@@ -1,0 +1,6 @@
+# The frozen architecture requires one statically linked pure-Go executable.
+joy-pi-health: statically-linked-binary [usr/bin/joy-pi-health]
+
+# The frozen architecture retains Go symbols for useful fatal diagnostics.
+joy-pi-health: unstripped-binary-or-object [usr/bin/joy-pi-health]
+

@@ -21,6 +21,16 @@ func TestPackageMetadata(t *testing.T) {
 			t.Errorf("control.in is missing %q", required)
 		}
 	}
+	changelog := read(t, "debian", "changelog")
+	if !strings.HasPrefix(changelog, "joy-pi-health (0.1.0-1) unstable; urgency=medium") {
+		t.Error("Debian changelog does not identify the canonical package version")
+	}
+	overrides := read(t, "debian", "lintian-overrides")
+	for _, intentional := range []string{"statically-linked-binary", "unstripped-binary-or-object"} {
+		if !strings.Contains(overrides, intentional) {
+			t.Errorf("lintian overrides do not document %q", intentional)
+		}
+	}
 }
 
 func TestSystemdContract(t *testing.T) {
@@ -116,6 +126,7 @@ func TestReleaseBuilderContract(t *testing.T) {
 	for _, required := range []string{
 		"version=0.1.0-1", "CGO_ENABLED=0", "GOOS=linux", "GOARCH=arm64", "GOARM64=v8.0",
 		"go1.27.1", "-trimpath", "-buildvcs=false", "cmp -s", "--root-owner-group",
+		"--uniform-compression", "--compression=gzip", "--compression-level=9",
 		"--sort=name", "gzip -n", "sha256sum", "third_party_dependencies", "@FIRMWARE_ACCESS@",
 		"install -m 0755", "install -m 0644", "dpkg-deb --extract",
 	} {

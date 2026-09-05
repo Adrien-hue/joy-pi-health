@@ -87,6 +87,7 @@ On Debian 13 (Trixie), build deterministic ARM64 Debian and portable artifacts f
 
 ```text
 sh debian/build-release.sh
+sh test/release/validate-artifacts.sh dist
 ```
 
 The default managed permission profile combines the service's supplementary `video` credential with a closed systemd device policy for `/dev/vcio` and `/dev/vcio_gencmd`. The service remains unprivileged. An ACL build profile exists only as the frozen fallback for real Pi 3B validation:
@@ -102,6 +103,12 @@ sudo apt install ./dist/joy-pi-health_0.1.0-1_arm64.deb
 ```
 
 The package installs a managed systemd service at `/usr/bin/joy-pi-health`, creates the locked `_joy-pi-health` service identity, enables boot start, and starts subject to Debian service policy. Administrator overrides belong under `/etc/systemd/system/joy-pi-health.service.d/` and are preserved across package lifecycle operations. The portable tar archive contains no installation script and can be run without root or systemd.
+
+## Continuous validation
+
+GitHub Actions runs repository quality checks on Linux and Windows, performs Linux/ARM64 compile-only validation, and builds the release artifacts twice inside a pinned Debian Trixie environment. The Debian job calls the canonical release builder and validates the resulting package, systemd unit, archive, metadata, checksums, and reproducibility.
+
+CI outputs are retained only as labelled validation artifacts. They are not official releases and do not establish Raspberry Pi compatibility. The exact validated bytes must still pass the real Pi 3B release gates described in the [release-validation and handoff procedure](docs/release-validation.md).
 
 ## License
 

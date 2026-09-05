@@ -98,6 +98,7 @@ mkdir -p "$package_root/DEBIAN" \
     "$package_root/usr/bin" \
     "$package_root/usr/lib/systemd/system" \
     "$package_root/usr/lib/sysusers.d" \
+    "$package_root/usr/share/lintian/overrides" \
     "$package_root/usr/share/doc/joy-pi-health/docs"
 
 acl_depends=
@@ -122,13 +123,17 @@ sed "s/@FIRMWARE_ACCESS@/$firmware_access/g" debian/postrm >"$package_root/DEBIA
 chmod 0755 "$package_root/DEBIAN/postinst" "$package_root/DEBIAN/postrm"
 install -m 0644 debian/joy-pi-health.sysusers "$package_root/usr/lib/sysusers.d/joy-pi-health.conf"
 install -m 0644 debian/copyright "$package_root/usr/share/doc/joy-pi-health/copyright"
+gzip -n -9 -c debian/changelog >"$package_root/usr/share/doc/joy-pi-health/changelog.Debian.gz"
+chmod 0644 "$package_root/usr/share/doc/joy-pi-health/changelog.Debian.gz"
+install -m 0644 debian/lintian-overrides "$package_root/usr/share/lintian/overrides/joy-pi-health"
 install -m 0644 README.md LICENSE "$metadata" "$package_root/usr/share/doc/joy-pi-health/"
 install -m 0644 docs/requirements-v0.1.md docs/http-api-v0.1.md docs/architecture-v0.1.md \
     "$package_root/usr/share/doc/joy-pi-health/docs/"
 
 find "$package_root" -exec touch -d "@$source_date_epoch" {} +
 deb_path="$root/dist/joy-pi-health_${version}_arm64.deb"
-dpkg-deb --root-owner-group --build "$package_root" "$deb_path"
+dpkg-deb --root-owner-group --uniform-compression --compression=gzip --compression-level=9 \
+    --build "$package_root" "$deb_path"
 
 archive_root="$work/joy-pi-health-v${upstream_version}-linux-arm64"
 mkdir -p "$archive_root/docs"

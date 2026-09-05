@@ -1,0 +1,101 @@
+name: Debian release validation
+
+on:
+  pull_request:
+    paths:
+      - cmd/**
+      - internal/**
+      - debian/**
+      - docs/**
+      - test/**
+      - .github/workflows/quality.yml
+      - .github/workflows/release-validation.yml
+      - go.mod
+      - go.sum
+      - README.md
+      - LICENSE
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - cmd/**
+      - internal/**
+      - debian/**
+      - docs/**
+      - test/**
+      - .github/workflows/quality.yml
+      - .github/workflows/release-validation.yml
+      - go.mod
+      - go.sum
+      - README.md
+      - LICENSE
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debian-trixie:
+    name: Debian Trixie artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
+    steps:
+      - name: Install Debian validation tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+            acl bash binutils ca-certificates coreutils curl dash dpkg-dev file findutils \
+            git gzip jq lintian sed systemd tar udev
+          rm -rf /var/lib/apt/lists/*
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Install Go 1.27.1
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.27.1
+          cache: false
+      - name: Verify source and shell syntax
+        shell: bash
+        run: |
+          test "$(go env GOVERSION)" = go1.27.1
+          go test ./...
+          dash -n debian/build-release.sh debian/postinst debian/prerm debian/postrm test/release/validate-artifacts.sh
+      - name: Build and validate first artifact set
+        shell: bash
+        run: |
+          epoch=$(git show -s --format=%ct HEAD)
+          SOURCE_DATE_EPOCH="$epoch" sh debian/build-release.sh
+          sh test/release/validate-artifacts.sh dist
+          cp -a dist /tmp/joy-pi-health-release-first
+      - name: Rebuild and prove artifact reproducibility
+        shell: bash
+        run: |
+          rm -rf dist
+          epoch=$(git show -s --format=%ct HEAD)
+          SOURCE_DATE_EPOCH="$epoch" sh debian/build-release.sh
+          sh test/release/validate-artifacts.sh dist
+          for artifact in \
+            joy-pi-health_0.1.0-1_arm64.deb \
+            joy-pi-health-v0.1.0-linux-arm64.tar.gz \
+            joy-pi-health-v0.1.0-release.json \
+            SHA256SUMS; do
+              cmp "/tmp/joy-pi-health-release-first/$artifact" "dist/$artifact"
+          done
+      - name: Upload CI validation artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: joy-pi-health-ci-validation-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
