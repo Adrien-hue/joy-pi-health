@@ -23,7 +23,8 @@ type httpRuntime interface {
 
 type lifecycleDependencies struct {
 	signalContext func() (context.Context, context.CancelFunc)
-	startHTTP     func(context.Context, config.Config, func(error), io.Writer) (httpRuntime, error)
+	startHTTP     func(context.Context, config.Config, func(error), *lineLogger) (httpRuntime, error)
+	notifyReady   func([]string) error
 }
 
 // Run is the process-level application boundary.
@@ -33,6 +34,7 @@ func Run(args []string, environment []string, stdout, stderr io.Writer) int {
 	return run(args, environment, stdout, stderr, lifecycleDependencies{
 		signalContext: newSignalContext,
 		startHTTP:     startHTTP,
+		notifyReady:   notifySystemdReady,
 	})
 }
 
@@ -46,6 +48,10 @@ func run(args []string, environment []string, stdout, stderr io.Writer, dependen
 		_, _ = io.WriteString(stderr, "joy-pi-health: configuration error: "+err.Error()+"\n")
 		return 2
 	}
+	logger := newLineLogger(stderr, resolved.LogLevel())
+	if dependencies.notifyReady == nil {
+		dependencies.notifyReady = func([]string) error { return nil }
+	}
 
 	ctx, stopSignals := dependencies.signalContext()
 	defer stopSignals()
@@ -55,44 +61,71 @@ func run(args []string, environment []string, stdout, stderr io.Writer, dependen
 
 	fatalResult := make(chan error, 1)
 	var fatalOnce sync.Once
+	readiness := &readinessGate{}
 	notifyFatal := func(fatalErr error) {
-		fatalOnce.Do(func() { fatalResult <- fatalErr })
+		fatalOnce.Do(func() {
+			readiness.markFatal()
+			fatalResult <- fatalErr
+		})
 	}
-	server, err := dependencies.startHTTP(ctx, resolved, notifyFatal, stderr)
+	server, err := dependencies.startHTTP(ctx, resolved, notifyFatal, logger)
 	if err != nil {
 		if ctx.Err() != nil {
 			return 0
 		}
-		writeOperationalError(stderr, "could not bind the configured listener")
+		if readiness.hasFatal() {
+			logger.error("operational error: internal service failure")
+		} else {
+			logger.error("operational error: service startup failed")
+		}
 		return 1
 	}
 
 	serveResult := make(chan error, 1)
+	serveStarted := make(chan struct{})
 	go func() {
+		close(serveStarted)
 		serveResult <- server.Serve()
 	}()
+	<-serveStarted
 
-	// Systemd readiness remains intentionally dormant until the CPU baseline,
-	// firmware executor, and final request admission gates all exist.
 	select {
 	case <-ctx.Done():
-		return shutDown(server, serveResult, stderr)
+		return shutDown(server, serveResult, logger)
 	case <-fatalResult:
-		writeOperationalError(stderr, "internal service failure")
-		_ = shutDown(server, serveResult, stderr)
+		logger.error("operational error: internal service failure")
+		_ = shutDown(server, serveResult, logger)
 		return 1
 	case serveErr := <-serveResult:
-		_ = server.Close()
-		if serveErr != nil {
-			writeOperationalError(stderr, "HTTP server failed")
-		} else {
-			writeOperationalError(stderr, "HTTP server stopped unexpectedly")
+		return unexpectedServeExit(server, serveErr, logger)
+	default:
+	}
+	if err := readiness.notify(ctx, func() error { return dependencies.notifyReady(environment) }); err != nil {
+		if ctx.Err() != nil {
+			return shutDown(server, serveResult, logger)
 		}
+		if readiness.hasFatal() {
+			logger.error("operational error: internal service failure")
+		} else {
+			logger.error("operational error: readiness notification failed")
+		}
+		_ = shutDown(server, serveResult, logger)
 		return 1
+	}
+
+	select {
+	case <-ctx.Done():
+		return shutDown(server, serveResult, logger)
+	case <-fatalResult:
+		logger.error("operational error: internal service failure")
+		_ = shutDown(server, serveResult, logger)
+		return 1
+	case serveErr := <-serveResult:
+		return unexpectedServeExit(server, serveErr, logger)
 	}
 }
 
-func startHTTP(ctx context.Context, resolved config.Config, fatal func(error), errorOutput io.Writer) (httpRuntime, error) {
+func startHTTP(ctx context.Context, resolved config.Config, fatal func(error), logger *lineLogger) (httpRuntime, error) {
 	source := platform.NewSource()
 	observer, err := observe.NewCPUObserver(source, fatal)
 	if err != nil {
@@ -107,13 +140,19 @@ func startHTTP(ctx context.Context, resolved config.Config, fatal func(error), e
 		_ = observer.Close(context.Background())
 		return nil, err
 	}
-	provider, err := observe.NewCoordinatorWithRaspberryPi(ctx, source, observer, platform.NewThermalSource(), firmware, fatal)
+	reporter, err := observe.NewDegradationReporter(logger.degradation)
 	if err != nil {
 		_ = observer.Close(context.Background())
 		_ = firmware.Close(context.Background())
 		return nil, err
 	}
-	server, err := httpapi.Listen(ctx, resolved.ListenAddress(), resolved.ListenPort(), provider, fatal, errorOutput)
+	provider, err := observe.NewCoordinatorWithRaspberryPi(ctx, source, observer, platform.NewThermalSource(), firmware, reporter, fatal)
+	if err != nil {
+		_ = observer.Close(context.Background())
+		_ = firmware.Close(context.Background())
+		return nil, err
+	}
+	server, err := httpapi.Listen(ctx, resolved.ListenAddress(), resolved.ListenPort(), provider, fatal, logger.errorWriter())
 	if err != nil {
 		_ = observer.Close(context.Background())
 		_ = firmware.Close(context.Background())
@@ -127,10 +166,36 @@ func startHTTP(ctx context.Context, resolved config.Config, fatal func(error), e
 		_ = firmware.Close(closeContext)
 		return nil, err
 	}
+	if err := observe.ProbeReadiness(ctx, source); err != nil {
+		_ = server.Close()
+		closeContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		_ = observer.Close(closeContext)
+		_ = firmware.Close(closeContext)
+		return nil, err
+	}
+	if err := firmware.Ready(); err != nil {
+		_ = server.Close()
+		closeContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		_ = observer.Close(closeContext)
+		_ = firmware.Close(closeContext)
+		return nil, err
+	}
 	return &productionRuntime{server: server, observer: observer, firmware: firmware}, nil
 }
 
-func shutDown(server httpRuntime, serveResult <-chan error, stderr io.Writer) int {
+func unexpectedServeExit(server httpRuntime, serveErr error, logger *lineLogger) int {
+	_ = server.Close()
+	if serveErr != nil {
+		logger.error("operational error: HTTP server failed")
+	} else {
+		logger.error("operational error: HTTP server stopped unexpectedly")
+	}
+	return 1
+}
+
+func shutDown(server httpRuntime, serveResult <-chan error, logger *lineLogger) int {
 	deadline := time.Now().Add(shutdownTimeout)
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
@@ -152,21 +217,17 @@ func shutDown(server httpRuntime, serveResult <-chan error, stderr io.Writer) in
 	case serveErr = <-serveResult:
 	case <-timer.C:
 		_ = server.Close()
-		writeOperationalError(stderr, "shutdown exceeded two seconds")
+		logger.error("operational error: shutdown exceeded two seconds")
 		return 1
 	}
 
 	if shutdownErr != nil {
-		writeOperationalError(stderr, "graceful shutdown failed")
+		logger.error("operational error: graceful shutdown failed")
 		return 1
 	}
 	if serveErr != nil {
-		writeOperationalError(stderr, "HTTP server failed during shutdown")
+		logger.error("operational error: HTTP server failed during shutdown")
 		return 1
 	}
 	return 0
-}
-
-func writeOperationalError(stderr io.Writer, message string) {
-	_, _ = io.WriteString(stderr, "joy-pi-health: operational error: "+message+"\n")
 }

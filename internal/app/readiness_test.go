@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -46,6 +48,53 @@ func TestNotifySystemdReadyWith(t *testing.T) {
 				t.Errorf("sender calls = %d, want %d", calls, test.wantCalls)
 			}
 		})
+	}
+}
+
+func TestReadinessGateNotifiesExactlyOnce(t *testing.T) {
+	t.Parallel()
+	gate := &readinessGate{}
+	var calls atomic.Int32
+	send := func() error { calls.Add(1); return nil }
+	if err := gate.notify(context.Background(), send); err != nil {
+		t.Fatal(err)
+	}
+	if err := gate.notify(context.Background(), send); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 || !gate.ready {
+		t.Fatalf("calls = %d, ready = %t", calls.Load(), gate.ready)
+	}
+}
+
+func TestReadinessGateRejectsFatalAndCancellation(t *testing.T) {
+	t.Parallel()
+	gate := &readinessGate{}
+	gate.markFatal()
+	if err := gate.notify(context.Background(), func() error { t.Fatal("sender called"); return nil }); err == nil {
+		t.Fatal("fatal readiness notification succeeded")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := (&readinessGate{}).notify(ctx, func() error { t.Fatal("sender called"); return nil }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled notification error = %v", err)
+	}
+}
+
+func TestReadinessGateRetainsNotifierFailure(t *testing.T) {
+	t.Parallel()
+	want := errors.New("notify failed")
+	gate := &readinessGate{}
+	var calls atomic.Int32
+	send := func() error { calls.Add(1); return want }
+	if err := gate.notify(context.Background(), send); !errors.Is(err, want) {
+		t.Fatalf("notification error = %v", err)
+	}
+	if err := gate.notify(context.Background(), func() error { t.Fatal("second sender called"); return nil }); !errors.Is(err, want) {
+		t.Fatalf("repeated notification error = %v", err)
+	}
+	if calls.Load() != 1 || gate.ready {
+		t.Fatalf("calls = %d, ready = %t", calls.Load(), gate.ready)
 	}
 }
 

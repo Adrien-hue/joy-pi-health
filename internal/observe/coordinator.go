@@ -65,6 +65,7 @@ type snapshotEncoder func(snapshot.Snapshot) (snapshot.Encoded, error)
 type coordinatorDependencies struct {
 	collectors  cycleCollectors
 	cpu         cpuPublicationProvider
+	degradation degradationReporter
 	now         func() time.Time
 	withTimeout timeoutFactory
 	encode      snapshotEncoder
@@ -75,6 +76,7 @@ type Coordinator struct {
 	lifecycle   context.Context
 	collectors  cycleCollectors
 	cpu         cpuPublicationProvider
+	degradation degradationReporter
 	now         func() time.Time
 	withTimeout timeoutFactory
 	encode      snapshotEncoder
@@ -125,13 +127,13 @@ func NewCoordinatorWithCPU(lifecycle context.Context, source platform.Source, cp
 
 // NewCoordinatorWithRaspberryPi creates the production coordinator backed by
 // both long-lived observers.
-func NewCoordinatorWithRaspberryPi(lifecycle context.Context, source platform.Source, cpu cpuPublicationProvider, thermal platform.ThermalSource, firmware firmwareObservationProvider, fatal func(error)) (*Coordinator, error) {
-	if source == nil || cpu == nil || thermal == nil || firmware == nil {
+func NewCoordinatorWithRaspberryPi(lifecycle context.Context, source platform.Source, cpu cpuPublicationProvider, thermal platform.ThermalSource, firmware firmwareObservationProvider, degradation degradationReporter, fatal func(error)) (*Coordinator, error) {
+	if source == nil || cpu == nil || thermal == nil || firmware == nil || degradation == nil {
 		return nil, errors.New("platform sources and observers are required")
 	}
 	return newCoordinator(lifecycle, fatal, coordinatorDependencies{
 		collectors: productionCollectors{source: source, raspberryPi: productionRaspberryPiCollector{thermal: thermal, firmware: firmware}},
-		cpu:        cpu, now: time.Now, withTimeout: context.WithTimeout, encode: snapshot.Encode,
+		cpu:        cpu, degradation: degradation, now: time.Now, withTimeout: context.WithTimeout, encode: snapshot.Encode,
 	})
 }
 
@@ -158,9 +160,12 @@ func newCoordinator(lifecycle context.Context, fatal func(error), dependencies c
 	case dependencies.encode == nil:
 		return nil, errors.New("snapshot encoder is required")
 	}
+	if dependencies.degradation == nil {
+		dependencies.degradation = noopDegradationReporter{}
+	}
 	return &Coordinator{
 		lifecycle: lifecycle, collectors: dependencies.collectors, cpu: dependencies.cpu, now: dependencies.now,
-		withTimeout: dependencies.withTimeout, encode: dependencies.encode, fatal: fatal,
+		degradation: dependencies.degradation, withTimeout: dependencies.withTimeout, encode: dependencies.encode, fatal: fatal,
 	}, nil
 }
 
@@ -526,12 +531,26 @@ func (coordinator *Coordinator) finalize(observations cycleObservations) (snapsh
 	setNetwork(&document, observations.network)
 	setValue(&document.CPU.UtilizationPercent, observations.cpuUtilization, "/cpu/utilization_percent", &document.Issues)
 
+	events := make([]degradationEvent, 0, len(document.Issues)+1)
 	if observations.host.hostname.state != statePresent {
+		events = append(events, degradationEvent{metric: "/host/hostname", reason: degradationCode(observations.host.hostname.reason)})
+	}
+	for _, issue := range document.Issues {
+		events = append(events, degradationEvent{metric: issue.Path, reason: issue.Code})
+	}
+
+	if observations.host.hostname.state != statePresent {
+		if err := coordinator.degradation.Report(events); err != nil {
+			return snapshot.Encoded{}, internalDefect(fmt.Errorf("report degradation: %w", err))
+		}
 		return snapshot.Encoded{}, snapshot.ErrNoUsefulSnapshot
 	}
 	document.ObservedAt = coordinator.now().UTC()
 	encoded, err := coordinator.encode(document)
 	if err == nil || errors.Is(err, snapshot.ErrNoUsefulSnapshot) {
+		if reportErr := coordinator.degradation.Report(events); reportErr != nil {
+			return snapshot.Encoded{}, internalDefect(fmt.Errorf("report degradation: %w", reportErr))
+		}
 		return encoded, err
 	}
 	return snapshot.Encoded{}, internalDefect(fmt.Errorf("finalize snapshot: %w", err))

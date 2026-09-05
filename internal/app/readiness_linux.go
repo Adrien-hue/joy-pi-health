@@ -3,6 +3,7 @@
 package app
 
 import (
+	"io"
 	"net"
 	"time"
 )
@@ -17,6 +18,12 @@ func sendSystemdDatagram(socket string, payload []byte, timeout time.Duration) e
 	if err := connection.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
 		return err
 	}
-	_, err = connection.Write(payload)
-	return err
+	written, err := connection.Write(payload)
+	if err != nil {
+		return err
+	}
+	if written != len(payload) {
+		return io.ErrShortWrite
+	}
+	return nil
 }

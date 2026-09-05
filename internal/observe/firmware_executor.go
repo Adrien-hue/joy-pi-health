@@ -68,6 +68,17 @@ func (executor *FirmwareExecutor) Start() error {
 	return nil
 }
 
+// Ready verifies executor admission state without performing a firmware
+// transaction.
+func (executor *FirmwareExecutor) Ready() error {
+	executor.mu.Lock()
+	defer executor.mu.Unlock()
+	if !executor.started || executor.stopping || executor.busy || executor.failed != nil {
+		return errors.New("firmware executor is not ready")
+	}
+	return nil
+}
+
 func (executor *FirmwareExecutor) Observe(ctx context.Context, token *cycleToken) outcome[firmwareHealth] {
 	if ctx == nil || token == nil {
 		return defect[firmwareHealth](errors.New("firmware observation requires a context and cycle identity"))

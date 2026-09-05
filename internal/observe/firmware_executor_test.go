@@ -14,6 +14,36 @@ type firmwareTransactionStub struct {
 	call func() (uint32, error)
 }
 
+func TestFirmwareExecutorReadinessDoesNotTransact(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	executor, err := NewFirmwareExecutor(firmwareTransactionStub{call: func() (uint32, error) {
+		calls.Add(1)
+		return 0, nil
+	}}, func(error) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.Ready(); err == nil {
+		t.Fatal("unstarted executor reported ready")
+	}
+	if err := executor.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.Ready(); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("readiness performed %d transactions", calls.Load())
+	}
+	if err := executor.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.Ready(); err == nil {
+		t.Fatal("stopped executor reported ready")
+	}
+}
+
 func (transaction firmwareTransactionStub) GetThrottled() (uint32, error) { return transaction.call() }
 
 func TestFirmwareExecutorSuccessAndFailureClassification(t *testing.T) {

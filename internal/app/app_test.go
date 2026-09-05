@@ -50,7 +50,7 @@ func TestRunConfigurationOutcomesPrecedeRuntime(t *testing.T) {
 					runtimeCalled = true
 					return context.WithCancel(context.Background())
 				},
-				startHTTP: func(context.Context, config.Config, func(error), io.Writer) (httpRuntime, error) {
+				startHTTP: func(context.Context, config.Config, func(error), *lineLogger) (httpRuntime, error) {
 					runtimeCalled = true
 					return nil, errors.New("must not be called")
 				},
@@ -81,7 +81,7 @@ func TestRunAlreadyCancelledDoesNotBind(t *testing.T) {
 		signalContext: func() (context.Context, context.CancelFunc) {
 			return ctx, func() {}
 		},
-		startHTTP: func(context.Context, config.Config, func(error), io.Writer) (httpRuntime, error) {
+		startHTTP: func(context.Context, config.Config, func(error), *lineLogger) (httpRuntime, error) {
 			startCalled = true
 			return nil, errors.New("must not be called")
 		},
@@ -125,6 +125,99 @@ func TestRunServesUntilCleanCancellation(t *testing.T) {
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Errorf("run() output = stdout %q, stderr %q; want none", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunNotifiesReadyOnceAfterServeStarts(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	server := newFakeHTTPRuntime()
+	dependencies := dependenciesFor(ctx, server, nil)
+	ready := make(chan struct{})
+	var notifyCalls int
+	var notifyMu sync.Mutex
+	dependencies.notifyReady = func([]string) error {
+		select {
+		case <-server.started:
+		default:
+			t.Error("readiness emitted before Serve started")
+		}
+		notifyMu.Lock()
+		notifyCalls++
+		notifyMu.Unlock()
+		close(ready)
+		return nil
+	}
+	status := make(chan int, 1)
+	go func() { status <- run(nil, nil, io.Discard, io.Discard, dependencies) }()
+	waitForSignal(t, ready, "readiness notification")
+	cancel()
+	if got := waitForResult(t, status, "application shutdown"); got != 0 {
+		t.Fatalf("run() status = %d", got)
+	}
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	if notifyCalls != 1 {
+		t.Fatalf("readiness calls = %d", notifyCalls)
+	}
+}
+
+func TestRunNotifierFailureStopsRuntime(t *testing.T) {
+	t.Parallel()
+	server := newFakeHTTPRuntime()
+	dependencies := dependenciesFor(context.Background(), server, nil)
+	dependencies.notifyReady = func([]string) error { return errors.New("notify failed") }
+	var stderr bytes.Buffer
+	if status := run(nil, nil, io.Discard, &stderr, dependencies); status != 1 {
+		t.Fatalf("run() status = %d", status)
+	}
+	shutdownCalls, _ := server.calls()
+	if shutdownCalls != 1 {
+		t.Fatalf("shutdown calls = %d", shutdownCalls)
+	}
+	if !strings.Contains(stderr.String(), "ERROR operational error: readiness notification failed") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunFatalBeforeReadinessPreventsNotification(t *testing.T) {
+	t.Parallel()
+	server := newFakeHTTPRuntime()
+	notifyCalls := 0
+	dependencies := lifecycleDependencies{
+		signalContext: backgroundSignalContext,
+		startHTTP: func(_ context.Context, _ config.Config, fatal func(error), _ *lineLogger) (httpRuntime, error) {
+			fatal(errors.New("startup defect"))
+			return server, nil
+		},
+		notifyReady: func([]string) error { notifyCalls++; return nil },
+	}
+	if status := run(nil, nil, io.Discard, io.Discard, dependencies); status != 1 {
+		t.Fatalf("run() status = %d", status)
+	}
+	if notifyCalls != 0 {
+		t.Fatalf("readiness calls = %d", notifyCalls)
+	}
+}
+
+func TestRunCancellationBeforeReadinessPreventsNotification(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	server := newFakeHTTPRuntime()
+	notifyCalls := 0
+	dependencies := lifecycleDependencies{
+		signalContext: func() (context.Context, context.CancelFunc) { return ctx, func() {} },
+		startHTTP: func(context.Context, config.Config, func(error), *lineLogger) (httpRuntime, error) {
+			cancel()
+			return server, nil
+		},
+		notifyReady: func([]string) error { notifyCalls++; return nil },
+	}
+	if status := run(nil, nil, io.Discard, io.Discard, dependencies); status != 0 {
+		t.Fatalf("run() status = %d", status)
+	}
+	if notifyCalls != 0 {
+		t.Fatalf("readiness calls = %d", notifyCalls)
 	}
 }
 
@@ -230,7 +323,7 @@ func TestRunInternalHTTPFailureShutsDownAndExitsOne(t *testing.T) {
 	fatalReady := make(chan func(error), 1)
 	dependencies := lifecycleDependencies{
 		signalContext: func() (context.Context, context.CancelFunc) { return ctx, func() {} },
-		startHTTP: func(_ context.Context, _ config.Config, fatal func(error), _ io.Writer) (httpRuntime, error) {
+		startHTTP: func(_ context.Context, _ config.Config, fatal func(error), _ *lineLogger) (httpRuntime, error) {
 			fatalReady <- fatal
 			return server, nil
 		},
@@ -297,7 +390,7 @@ func dependenciesFor(ctx context.Context, server httpRuntime, startErr error) li
 		signalContext: func() (context.Context, context.CancelFunc) {
 			return ctx, func() {}
 		},
-		startHTTP: func(context.Context, config.Config, func(error), io.Writer) (httpRuntime, error) {
+		startHTTP: func(context.Context, config.Config, func(error), *lineLogger) (httpRuntime, error) {
 			return server, startErr
 		},
 	}
@@ -315,7 +408,14 @@ func assertDiagnostic(t *testing.T, diagnostic string, want bool, category strin
 		}
 		return
 	}
-	if !strings.HasPrefix(diagnostic, "joy-pi-health: "+category+": ") {
+	if category == "operational error" {
+		fields := strings.Fields(diagnostic)
+		if len(fields) < 5 || fields[1] != "ERROR" || fields[2] != "operational" || fields[3] != "error:" {
+			t.Errorf("stderr = %q, want timestamped operational error", diagnostic)
+		} else if _, err := time.Parse(time.RFC3339Nano, fields[0]); err != nil {
+			t.Errorf("stderr timestamp = %q: %v", fields[0], err)
+		}
+	} else if !strings.HasPrefix(diagnostic, "joy-pi-health: "+category+": ") {
 		t.Errorf("stderr = %q, want %s prefix", diagnostic, category)
 	}
 	if !strings.HasSuffix(diagnostic, "\n") {

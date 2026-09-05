@@ -33,6 +33,21 @@ type cpuProviderStub struct {
 	calls       int
 }
 
+type degradationReporterStub struct {
+	mu     sync.Mutex
+	calls  int
+	events [][]degradationEvent
+	err    error
+}
+
+func (reporter *degradationReporterStub) Report(events []degradationEvent) error {
+	reporter.mu.Lock()
+	defer reporter.mu.Unlock()
+	reporter.calls++
+	reporter.events = append(reporter.events, append([]degradationEvent(nil), events...))
+	return reporter.err
+}
+
 func (provider *cpuProviderStub) latestCPU() (outcome[cpuPublication], time.Duration) {
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
@@ -210,7 +225,14 @@ func TestCoordinatorTreatsFirmwareDefectAsCycleFatal(t *testing.T) {
 		firmware:    defect[firmwareHealth](errors.New("broken executor state")),
 	}
 	fatal := make(chan error, 1)
-	coordinator := mustTestCoordinator(t, context.Background(), collectors, func(err error) { fatal <- err }, time.Now, context.WithTimeout, snapshot.Encode)
+	reporter := &degradationReporterStub{}
+	coordinator, err := newCoordinator(context.Background(), func(err error) { fatal <- err }, coordinatorDependencies{
+		collectors: collectors, cpu: unavailableCPUProvider{}, degradation: reporter,
+		now: time.Now, withTimeout: context.WithTimeout, encode: snapshot.Encode,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := coordinator.Snapshot(context.Background()); !isInternalDefect(err) {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
@@ -221,6 +243,9 @@ func TestCoordinatorTreatsFirmwareDefectAsCycleFatal(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("fatal notification was not delivered")
+	}
+	if reporter.calls != 0 {
+		t.Fatalf("internal defect produced %d degradation reports", reporter.calls)
 	}
 }
 
@@ -420,6 +445,26 @@ func TestExpectedHostnameFailureReturnsUnavailableAfterFullCycle(t *testing.T) {
 	}
 }
 
+func TestExpectedHostnameFailureIsReportedAsDegradation(t *testing.T) {
+	t.Parallel()
+	collectors := completeCollectorStub()
+	collectors.host.hostname = unavailable[string](reasonUnsupported, errors.New("missing"))
+	reporter := &degradationReporterStub{}
+	coordinator, err := newCoordinator(context.Background(), func(error) {}, coordinatorDependencies{
+		collectors: collectors, cpu: unavailableCPUProvider{}, degradation: reporter,
+		now: time.Now, withTimeout: context.WithTimeout, encode: snapshot.Encode,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Snapshot(context.Background()); !errors.Is(err, snapshot.ErrNoUsefulSnapshot) {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if reporter.calls != 1 || len(reporter.events[0]) == 0 || reporter.events[0][0].metric != "/host/hostname" || reporter.events[0][0].reason != snapshot.IssueUnsupported {
+		t.Fatalf("degradation reports = %#v", reporter.events)
+	}
+}
+
 func TestCoordinatorRejectsZeroUsefulLeaves(t *testing.T) {
 	t.Parallel()
 	collectors := completeCollectorStub()
@@ -456,8 +501,9 @@ func TestJoinedRequestsShareOneCycleAndEncoding(t *testing.T) {
 	cpu := &cpuProviderStub{publication: present(cpuPublication{
 		utilizationPercent: 25, sampledAt: time.Second, topology: cpuTopology{count: 4, signature: "0-3"},
 	}), now: time.Second}
+	reporter := &degradationReporterStub{}
 	coordinator, err := newCoordinator(context.Background(), func(error) {}, coordinatorDependencies{
-		collectors: collectors, cpu: cpu, now: time.Now, withTimeout: context.WithTimeout, encode: encode,
+		collectors: collectors, cpu: cpu, degradation: reporter, now: time.Now, withTimeout: context.WithTimeout, encode: encode,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -510,6 +556,9 @@ func TestJoinedRequestsShareOneCycleAndEncoding(t *testing.T) {
 	}
 	if len(collectors.recordedCalls()) != 6 {
 		t.Errorf("collector calls = %v", collectors.recordedCalls())
+	}
+	if reporter.calls != 1 {
+		t.Errorf("degradation report calls = %d; want 1", reporter.calls)
 	}
 }
 

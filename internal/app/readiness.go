@@ -1,7 +1,11 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,9 +17,45 @@ const (
 
 type readinessSender func(string, []byte, time.Duration) error
 
-// notifySystemdReady is intentionally dormant until every frozen readiness
-// gate exists. Keeping the boundary here allows that later activation to remain
-// a single lifecycle operation.
+type readinessGate struct {
+	mu        sync.Mutex
+	attempted bool
+	ready     bool
+	fatal     bool
+	result    error
+	detected  atomic.Bool
+}
+
+func (gate *readinessGate) markFatal() {
+	gate.detected.Store(true)
+	gate.mu.Lock()
+	gate.fatal = true
+	gate.mu.Unlock()
+}
+
+func (gate *readinessGate) hasFatal() bool { return gate.detected.Load() }
+
+func (gate *readinessGate) notify(ctx context.Context, send func() error) error {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if gate.fatal || gate.detected.Load() {
+		return errors.New("fatal lifecycle transition prevents readiness")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if gate.attempted {
+		return gate.result
+	}
+	gate.attempted = true
+	gate.result = send()
+	if gate.detected.Load() {
+		gate.result = errors.New("fatal lifecycle transition prevents readiness")
+	}
+	gate.ready = gate.result == nil
+	return gate.result
+}
+
 func notifySystemdReady(environment []string) error {
 	return notifySystemdReadyWith(environment, sendSystemdDatagram)
 }

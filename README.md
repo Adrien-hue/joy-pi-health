@@ -65,7 +65,9 @@ The frozen operation is available at:
 curl.exe -i http://127.0.0.1:8080/v1/snapshot
 ```
 
-On the supported Linux target, CPU utilization is initially `null` while the observer establishes its baseline and becomes available after a valid trailing interval. Raspberry Pi temperature is read from the typed `cpu-thermal` kernel thermal zone. The four throttling and undervoltage fields depend on unprivileged access to `/dev/vcio_gencmd` or `/dev/vcio`; without suitable device access they remain `null` with the applicable issue while unrelated metrics remain available. Non-Linux builds are retained for development compatibility but are not supported runtime targets and return `503 temporarily_unavailable`. Stop the service with Ctrl+C. Production systemd readiness notification remains intentionally disabled until every frozen readiness gate exists.
+On the supported Linux target, CPU utilization is initially `null` while the observer establishes its baseline and becomes available after a valid trailing interval. Raspberry Pi temperature is read from the typed `cpu-thermal` kernel thermal zone. The four throttling and undervoltage fields depend on unprivileged access to `/dev/vcio_gencmd` or `/dev/vcio`; without suitable device access they remain `null` with the applicable issue while unrelated metrics remain available. Non-Linux builds are retained for development compatibility but are not supported runtime targets.
+
+When systemd provides `NOTIFY_SOCKET`, the service sends `READY=1` after listener binding, firmware-executor initialization, the initial CPU baseline attempt, HTTP admission setup, and a minimal successful snapshot-capability probe. Manual execution does not require systemd. Expected metric degradation is logged to stderr on first occurrence, at most once every five minutes while unchanged, and once when it clears; successful requests are not logged. Stop the service with Ctrl+C.
 
 Compile the production code for the Raspberry Pi 3B architecture without executing it:
 
