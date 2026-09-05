@@ -6,7 +6,7 @@ The service will expose one current snapshot of CPU, load, memory, root-filesyst
 
 ## Project status
 
-The v0.1 requirements and architecture are frozen and approved. The configuration, foreground lifecycle, and public HTTP/JSON contract foundations exist, but metric collection has not started. There is currently no functional monitoring service or release artifact.
+The v0.1 requirements and architecture are frozen and approved. The configuration, foreground lifecycle, public HTTP/JSON contract, and generic Linux observation foundations exist. Generic observations are not connected to the HTTP operation yet, so there is currently no functional monitoring service or release artifact.
 
 Canonical repository and Go module path:
 
@@ -45,7 +45,7 @@ git diff --check
 git status --short
 ```
 
-`go version` must report Go 1.27.1, and the module-tidiness and formatting checks must produce no output. The executable currently supports configuration, lifecycle, and HTTP-contract development only.
+`go version` must report Go 1.27.1, and the module-tidiness and formatting checks must produce no output. The executable currently supports configuration, lifecycle, and HTTP-contract development. Generic Linux host observation is implemented as an internal component but is not yet part of the running service.
 
 The implemented command-line configuration can be inspected with:
 
