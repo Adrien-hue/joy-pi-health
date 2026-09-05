@@ -32,6 +32,9 @@ type LinuxSource struct{}
 
 func NewLinuxSource() LinuxSource { return LinuxSource{} }
 
+// NewSource returns the production source for the supported Linux runtime.
+func NewSource() Source { return NewLinuxSource() }
+
 func (LinuxSource) Hostname() (string, error)  { return os.Hostname() }
 func (LinuxSource) Uptime() ([]byte, error)    { return readBounded(uptimePath, maximumUptimeBytes) }
 func (LinuxSource) CPUOnline() ([]byte, error) { return readBounded(cpuOnlinePath, maximumCPUBytes) }

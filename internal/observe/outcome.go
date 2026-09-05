@@ -3,6 +3,7 @@ package observe
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 )
 
@@ -57,5 +58,27 @@ func acquisitionFailure[T any](err error, missing availabilityReason) outcome[T]
 		return unavailable[T](missing, err)
 	default:
 		return unavailable[T](reasonTemporarilyUnavailable, err)
+	}
+}
+
+func validateOutcome[T any](value outcome[T]) error {
+	switch value.state {
+	case statePresent:
+		if value.reason != 0 || value.cause != nil {
+			return errors.New("present outcome carries failure metadata")
+		}
+		return nil
+	case stateUnavailable:
+		if value.reason < reasonUnsupported || value.reason > reasonTemporarilyUnavailable || value.cause == nil {
+			return errors.New("unavailable outcome is incomplete")
+		}
+		return nil
+	case stateDefect:
+		if value.cause == nil {
+			return errors.New("defect outcome has no cause")
+		}
+		return fmt.Errorf("collector defect: %w", value.cause)
+	default:
+		return errors.New("collector returned an unknown outcome state")
 	}
 }

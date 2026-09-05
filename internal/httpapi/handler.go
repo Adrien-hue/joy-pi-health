@@ -20,8 +20,8 @@ const (
 	maximumErrorSize        = 2 * 1024
 )
 
-// SnapshotProvider supplies a finalized current snapshot. A future collection
-// coordinator will implement this boundary without coupling HTTP to observation.
+// SnapshotProvider supplies a finalized current snapshot without coupling HTTP
+// transport to observation semantics.
 type SnapshotProvider interface {
 	Snapshot(context.Context) (snapshot.Encoded, error)
 }

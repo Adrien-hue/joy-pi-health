@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/Adrien-hue/joy-pi-health/internal/config"
 	"github.com/Adrien-hue/joy-pi-health/internal/httpapi"
-	"github.com/Adrien-hue/joy-pi-health/internal/snapshot"
+	"github.com/Adrien-hue/joy-pi-health/internal/observe"
+	"github.com/Adrien-hue/joy-pi-health/internal/platform"
 )
 
 const shutdownTimeout = 2 * time.Second
@@ -52,11 +54,9 @@ func run(args []string, environment []string, stdout, stderr io.Writer, dependen
 	}
 
 	fatalResult := make(chan error, 1)
+	var fatalOnce sync.Once
 	notifyFatal := func(fatalErr error) {
-		select {
-		case fatalResult <- fatalErr:
-		default:
-		}
+		fatalOnce.Do(func() { fatalResult <- fatalErr })
 	}
 	server, err := dependencies.startHTTP(ctx, resolved, notifyFatal, stderr)
 	if err != nil {
@@ -78,7 +78,7 @@ func run(args []string, environment []string, stdout, stderr io.Writer, dependen
 	case <-ctx.Done():
 		return shutDown(server, serveResult, stderr)
 	case <-fatalResult:
-		writeOperationalError(stderr, "internal HTTP failure")
+		writeOperationalError(stderr, "internal service failure")
 		_ = shutDown(server, serveResult, stderr)
 		return 1
 	case serveErr := <-serveResult:
@@ -93,15 +93,11 @@ func run(args []string, environment []string, stdout, stderr io.Writer, dependen
 }
 
 func startHTTP(ctx context.Context, resolved config.Config, fatal func(error), errorOutput io.Writer) (httpRuntime, error) {
-	return httpapi.Listen(ctx, resolved.ListenAddress(), resolved.ListenPort(), pendingSnapshotProvider{}, fatal, errorOutput)
-}
-
-// pendingSnapshotProvider keeps the public transport honest until the real
-// collection coordinator is introduced.
-type pendingSnapshotProvider struct{}
-
-func (pendingSnapshotProvider) Snapshot(context.Context) (snapshot.Encoded, error) {
-	return snapshot.Encoded{}, snapshot.ErrNoUsefulSnapshot
+	provider, err := observe.NewCoordinator(ctx, platform.NewSource(), fatal)
+	if err != nil {
+		return nil, err
+	}
+	return httpapi.Listen(ctx, resolved.ListenAddress(), resolved.ListenPort(), provider, fatal, errorOutput)
 }
 
 func shutDown(server httpRuntime, serveResult <-chan error, stderr io.Writer) int {
