@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+firmware_access=@FIRMWARE_ACCESS@
+
+remove_acl() {
+    for device in /dev/vcio /dev/vcio_gencmd; do
+        if [ -e "$device" ]; then
+            setfacl -x u:_joy-pi-health "$device" 2>/dev/null || true
+        fi
+    done
+}
+
+case "${1:-}" in
+    remove|purge)
+        if [ "$firmware_access" = acl ]; then
+            if command -v setfacl >/dev/null 2>&1; then
+                remove_acl
+            fi
+            if command -v udevadm >/dev/null 2>&1; then
+                udevadm control --reload-rules || true
+            fi
+        fi
+        if [ -d /run/systemd/system ]; then
+            systemctl --system daemon-reload || true
+        fi
+        ;;
+esac
+
+exit 0

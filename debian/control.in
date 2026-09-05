@@ -1,0 +1,11 @@
+Package: joy-pi-health
+Version: @VERSION@
+Architecture: arm64
+Maintainer: Adrien_hue <adrien.houee1@gmail.com>
+Section: admin
+Priority: optional
+Depends: init-system-helpers (>= 1.60), systemd (>= 254)@ACL_DEPENDS@
+Description: lightweight Raspberry Pi host health service
+ Joy Pi Health exposes a bounded HTTP/JSON snapshot of Raspberry Pi host
+ resources and platform health. It runs as an unprivileged foreground service.
+

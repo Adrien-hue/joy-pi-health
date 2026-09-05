@@ -6,7 +6,7 @@ The service will expose one current snapshot of CPU, load, memory, root-filesyst
 
 ## Project status
 
-The v0.1 requirements and architecture are frozen and approved. The service now exposes real generic Linux host observations, trailing CPU utilization after its initial sampling interval, and Raspberry Pi SoC temperature and firmware health observations through the public HTTP/JSON snapshot contract. There is no release artifact yet.
+The v0.1 requirements and architecture are frozen and approved. The service now exposes real generic Linux host observations, trailing CPU utilization after its initial sampling interval, and Raspberry Pi SoC temperature and firmware health observations through the public HTTP/JSON snapshot contract. Debian and portable release packaging is implemented, but no release has been published and the real Pi 3B release gates have not yet been claimed.
 
 Canonical repository and Go module path:
 
@@ -81,6 +81,28 @@ From Windows PowerShell, run the same check in a child process so the cross-buil
 powershell -NoProfile -Command '$env:CGO_ENABLED="0"; $env:GOOS="linux"; $env:GOARCH="arm64"; $env:GOARM64="v8.0"; go build ./...'
 ```
 
+## Packaging
+
+On Debian 13 (Trixie), build deterministic ARM64 Debian and portable artifacts from a clean committed worktree with:
+
+```text
+sh debian/build-release.sh
+```
+
+The default managed permission profile combines the service's supplementary `video` credential with a closed systemd device policy for `/dev/vcio` and `/dev/vcio_gencmd`. The service remains unprivileged. An ACL build profile exists only as the frozen fallback for real Pi 3B validation:
+
+```text
+sh debian/build-release.sh --firmware-access acl
+```
+
+Artifacts are written beneath `dist/` and are not committed. Install the generated Debian package through the package manager:
+
+```text
+sudo apt install ./dist/joy-pi-health_0.1.0-1_arm64.deb
+```
+
+The package installs a managed systemd service at `/usr/bin/joy-pi-health`, creates the locked `_joy-pi-health` service identity, enables boot start, and starts subject to Debian service policy. Administrator overrides belong under `/etc/systemd/system/joy-pi-health.service.d/` and are preserved across package lifecycle operations. The portable tar archive contains no installation script and can be run without root or systemd.
+
 ## License
 
-No project license has been selected or added yet.
+Joy Pi Health is licensed under the [MIT License](LICENSE).

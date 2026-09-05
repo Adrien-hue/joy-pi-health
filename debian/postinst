@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+
+unit=joy-pi-health.service
+firmware_access=@FIRMWARE_ACCESS@
+
+apply_acl() {
+    for device in /dev/vcio /dev/vcio_gencmd; do
+        if [ -e "$device" ]; then
+            setfacl -m u:_joy-pi-health:r-- "$device"
+        fi
+    done
+}
+
+if [ "${1:-}" = configure ]; then
+    systemd-sysusers /usr/lib/sysusers.d/joy-pi-health.conf
+
+    if [ "$firmware_access" = acl ]; then
+        udevadm control --reload-rules || true
+        apply_acl
+    fi
+
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload || true
+    fi
+
+    if [ -z "${2:-}" ]; then
+        deb-systemd-helper enable "$unit"
+        deb-systemd-invoke start "$unit"
+    else
+        deb-systemd-invoke try-restart "$unit"
+    fi
+fi
+
+exit 0

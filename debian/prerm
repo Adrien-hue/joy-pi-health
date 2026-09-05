@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+unit=joy-pi-health.service
+
+if [ "${1:-}" = remove ]; then
+    deb-systemd-invoke stop "$unit"
+    deb-systemd-helper disable "$unit"
+fi
+
+exit 0
+

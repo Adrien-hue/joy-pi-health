@@ -1,0 +1,41 @@
+[Unit]
+Description=Joy Pi Health Raspberry Pi host observer
+Documentation=file:/usr/share/doc/joy-pi-health/README.md
+After=network.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/joy-pi-health
+User=_joy-pi-health
+Group=_joy-pi-health
+@SUPPLEMENTARY_GROUPS@
+Restart=on-failure
+RestartPreventExitStatus=2
+RestartSec=1s
+RestartSteps=5
+RestartMaxDelaySec=30s
+TimeoutStopSec=2s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+DevicePolicy=closed
+DeviceAllow=/dev/vcio r
+DeviceAllow=/dev/vcio_gencmd r
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
