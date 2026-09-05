@@ -38,7 +38,7 @@ Do not reread unrelated documents for trivial changes, but do not make a materia
 
 ## Verification and commands
 
-No implementation commands exist yet. When commands are introduced, document the supported command catalog in `README.md`; use those commands and keep that catalog current.
+The supported development and verification command catalog is in `README.md`. Use those commands and keep that catalog current as workflows change; do not duplicate the catalog here.
 
 Run focused checks while iterating and all applicable checks before handoff. Never claim Pi 3B acceptance without results from the real release-gating device. Record results from Pi 3B+, 4B, and 5 without strengthening compatibility claims beyond their evidence.
 

@@ -6,7 +6,7 @@ The service will expose one current snapshot of CPU, load, memory, root-filesyst
 
 ## Project status
 
-The v0.1 requirements and architecture are frozen and approved. Product implementation has **not started yet**. There is currently no executable, build command, test command, package, or release artifact.
+The v0.1 requirements and architecture are frozen and approved. The initial Go repository foundation exists, but the service is not operational and metric collection has not started. There is currently no runnable service or release artifact.
 
 Canonical repository and Go module path:
 
@@ -28,9 +28,20 @@ The release-gating target is a real Raspberry Pi 3B running 64-bit Raspberry Pi 
 
 Joy Pi Health is read-only and runs unprivileged. It listens on `127.0.0.1:8080` by default. Non-loopback exposure requires explicit operator acknowledgement and is intended only for trusted private networks. v0.1 provides neither authentication nor TLS.
 
-## Development and operation
+## Development
 
-No development, validation, installation, or execution commands exist yet. This section must be updated when implementation introduces supported commands; commands must not be invented in advance.
+Development requires Go 1.27.1. From the repository root, the supported foundation checks are:
+
+```text
+go version
+go mod tidy -diff
+gofmt -l cmd internal
+go test ./...
+go vet ./...
+go build ./...
+```
+
+`go version` must report Go 1.27.1, and the module-tidiness and formatting checks must produce no output. Running Joy Pi Health is not supported yet; the executable is only a startup boundary for subsequent implementation.
 
 ## License
 
