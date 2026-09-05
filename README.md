@@ -6,7 +6,7 @@ The service will expose one current snapshot of CPU, load, memory, root-filesyst
 
 ## Project status
 
-The v0.1 requirements and architecture are frozen and approved. The service now exposes real generic Linux host observations through the public HTTP/JSON snapshot contract. CPU utilization and Raspberry Pi-specific observations are not implemented yet, and there is no release artifact.
+The v0.1 requirements and architecture are frozen and approved. The service now exposes real generic Linux host observations, including trailing CPU utilization after its initial sampling interval, through the public HTTP/JSON snapshot contract. Raspberry Pi-specific observations are not implemented yet, and there is no release artifact.
 
 Canonical repository and Go module path:
 
@@ -45,7 +45,7 @@ git diff --check
 git status --short
 ```
 
-`go version` must report Go 1.27.1, and the module-tidiness and formatting checks must produce no output. On Linux, the executable currently collects hostname, uptime, logical CPU count, load averages, memory, root-filesystem storage, and network observations.
+`go version` must report Go 1.27.1, and the module-tidiness and formatting checks must produce no output. On Linux, the executable currently collects hostname, uptime, logical CPU count, trailing CPU utilization, load averages, memory, root-filesystem storage, and network observations.
 
 The implemented command-line configuration can be inspected with:
 
@@ -65,7 +65,7 @@ The frozen operation is available at:
 curl.exe -i http://127.0.0.1:8080/v1/snapshot
 ```
 
-On the supported Linux target, a valid request returns a partial snapshot with real generic metrics. CPU utilization and the five Raspberry Pi-specific fields remain `null` with `temporarily_unavailable` issues until their collectors exist. Non-Linux builds are retained for development compatibility but are not supported runtime targets and return `503 temporarily_unavailable`. Stop the service with Ctrl+C. Production systemd readiness notification remains intentionally disabled until every frozen readiness gate exists.
+On the supported Linux target, CPU utilization is initially `null` while the observer establishes its baseline and becomes available after a valid trailing interval. A valid request remains a partial snapshot because the five Raspberry Pi-specific fields are still `null` with `temporarily_unavailable` issues until their collectors exist. Non-Linux builds are retained for development compatibility but are not supported runtime targets and return `503 temporarily_unavailable`. Stop the service with Ctrl+C. Production systemd readiness notification remains intentionally disabled until every frozen readiness gate exists.
 
 Compile the production code for the Raspberry Pi 3B architecture without executing it:
 

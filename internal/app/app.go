@@ -93,11 +93,29 @@ func run(args []string, environment []string, stdout, stderr io.Writer, dependen
 }
 
 func startHTTP(ctx context.Context, resolved config.Config, fatal func(error), errorOutput io.Writer) (httpRuntime, error) {
-	provider, err := observe.NewCoordinator(ctx, platform.NewSource(), fatal)
+	source := platform.NewSource()
+	observer, err := observe.NewCPUObserver(source, fatal)
 	if err != nil {
 		return nil, err
 	}
-	return httpapi.Listen(ctx, resolved.ListenAddress(), resolved.ListenPort(), provider, fatal, errorOutput)
+	provider, err := observe.NewCoordinatorWithCPU(ctx, source, observer, fatal)
+	if err != nil {
+		_ = observer.Close(context.Background())
+		return nil, err
+	}
+	server, err := httpapi.Listen(ctx, resolved.ListenAddress(), resolved.ListenPort(), provider, fatal, errorOutput)
+	if err != nil {
+		_ = observer.Close(context.Background())
+		return nil, err
+	}
+	if err := observer.Start(); err != nil {
+		_ = server.Close()
+		closeContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		_ = observer.Close(closeContext)
+		return nil, err
+	}
+	return &productionRuntime{server: server, observer: observer}, nil
 }
 
 func shutDown(server httpRuntime, serveResult <-chan error, stderr io.Writer) int {

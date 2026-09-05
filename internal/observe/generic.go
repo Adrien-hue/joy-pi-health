@@ -33,8 +33,9 @@ type loadObservation struct {
 }
 
 type cpuLoadObservation struct {
-	logicalCPUCount outcome[uint64]
-	load            outcome[loadObservation]
+	logicalCPUCount   outcome[uint64]
+	topologySignature string
+	load              outcome[loadObservation]
 }
 
 type memoryObservation struct {
@@ -77,23 +78,25 @@ func collectCPULoad(ctx context.Context, source platform.Source) cpuLoadObservat
 	}
 	cpuData, err := source.CPUOnline()
 	cpuResult := outcome[uint64]{}
+	topologySignature := ""
 	if err != nil {
 		cpuResult = acquisitionFailure[uint64](err, reasonUnsupported)
-	} else if count, parseErr := parseCPUList(cpuData); parseErr != nil {
+	} else if topology, parseErr := parseCPUTopology(cpuData); parseErr != nil {
 		cpuResult = unavailable[uint64](reasonTemporarilyUnavailable, parseErr)
 	} else {
-		cpuResult = present(count)
+		cpuResult = present(topology.count)
+		topologySignature = topology.signature
 	}
 
 	loadData, err := source.LoadAverage()
 	if err != nil {
-		return cpuLoadObservation{logicalCPUCount: cpuResult, load: acquisitionFailure[loadObservation](err, reasonUnsupported)}
+		return cpuLoadObservation{logicalCPUCount: cpuResult, topologySignature: topologySignature, load: acquisitionFailure[loadObservation](err, reasonUnsupported)}
 	}
 	load, err := parseLoad(loadData)
 	if err != nil {
-		return cpuLoadObservation{logicalCPUCount: cpuResult, load: unavailable[loadObservation](reasonTemporarilyUnavailable, err)}
+		return cpuLoadObservation{logicalCPUCount: cpuResult, topologySignature: topologySignature, load: unavailable[loadObservation](reasonTemporarilyUnavailable, err)}
 	}
-	return cpuLoadObservation{logicalCPUCount: cpuResult, load: present(load)}
+	return cpuLoadObservation{logicalCPUCount: cpuResult, topologySignature: topologySignature, load: present(load)}
 }
 
 func collectMemory(ctx context.Context, source platform.Source) outcome[memoryObservation] {
@@ -146,48 +149,64 @@ func parseUptime(data []byte) (uint64, error) {
 }
 
 func parseCPUList(data []byte) (uint64, error) {
+	topology, err := parseCPUTopology(data)
+	return topology.count, err
+}
+
+type cpuTopology struct {
+	count     uint64
+	signature string
+}
+
+func parseCPUTopology(data []byte) (cpuTopology, error) {
 	if len(data) == 0 || len(data) > maximumCPUInput {
-		return 0, errors.New("CPU list is empty or oversized")
+		return cpuTopology{}, errors.New("CPU list is empty or oversized")
 	}
 	text := strings.TrimSpace(string(data))
 	if text == "" {
-		return 0, errors.New("CPU list is empty")
+		return cpuTopology{}, errors.New("CPU list is empty")
 	}
 	var count uint64
 	var previous uint64
+	canonical := make([]string, 0, strings.Count(text, ",")+1)
 	for index, item := range strings.Split(text, ",") {
 		bounds := strings.Split(item, "-")
 		if len(bounds) > 2 || bounds[0] == "" {
-			return 0, errors.New("CPU list contains an invalid range")
+			return cpuTopology{}, errors.New("CPU list contains an invalid range")
 		}
 		start, err := strconv.ParseUint(bounds[0], 10, 64)
 		if err != nil {
-			return 0, errors.New("CPU list contains an invalid number")
+			return cpuTopology{}, errors.New("CPU list contains an invalid number")
 		}
 		end := start
 		if len(bounds) == 2 {
 			if bounds[1] == "" {
-				return 0, errors.New("CPU list contains an invalid range")
+				return cpuTopology{}, errors.New("CPU list contains an invalid range")
 			}
 			end, err = strconv.ParseUint(bounds[1], 10, 64)
 			if err != nil || end < start {
-				return 0, errors.New("CPU list contains an invalid range")
+				return cpuTopology{}, errors.New("CPU list contains an invalid range")
 			}
 		}
 		if index != 0 && start <= previous {
-			return 0, errors.New("CPU list is overlapping or unordered")
+			return cpuTopology{}, errors.New("CPU list is overlapping or unordered")
 		}
 		length := end - start + 1
 		if length == 0 || count > math.MaxUint64-length {
-			return 0, errors.New("CPU count overflows")
+			return cpuTopology{}, errors.New("CPU count overflows")
 		}
 		count += length
 		previous = end
+		if start == end {
+			canonical = append(canonical, strconv.FormatUint(start, 10))
+		} else {
+			canonical = append(canonical, strconv.FormatUint(start, 10)+"-"+strconv.FormatUint(end, 10))
+		}
 	}
 	if count == 0 {
-		return 0, errors.New("CPU list contains no processors")
+		return cpuTopology{}, errors.New("CPU list contains no processors")
 	}
-	return count, nil
+	return cpuTopology{count: count, signature: strings.Join(canonical, ",")}, nil
 }
 
 func parseLoad(data []byte) (loadObservation, error) {

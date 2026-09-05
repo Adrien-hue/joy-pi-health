@@ -58,6 +58,7 @@ type snapshotEncoder func(snapshot.Snapshot) (snapshot.Encoded, error)
 
 type coordinatorDependencies struct {
 	collectors  cycleCollectors
+	cpu         cpuPublicationProvider
 	now         func() time.Time
 	withTimeout timeoutFactory
 	encode      snapshotEncoder
@@ -67,6 +68,7 @@ type coordinatorDependencies struct {
 type Coordinator struct {
 	lifecycle   context.Context
 	collectors  cycleCollectors
+	cpu         cpuPublicationProvider
 	now         func() time.Time
 	withTimeout timeoutFactory
 	encode      snapshotEncoder
@@ -91,10 +93,29 @@ func NewCoordinator(lifecycle context.Context, source platform.Source, fatal fun
 	}
 	return newCoordinator(lifecycle, fatal, coordinatorDependencies{
 		collectors:  productionCollectors{source: source},
+		cpu:         unavailableCPUProvider{},
 		now:         time.Now,
 		withTimeout: context.WithTimeout,
 		encode:      snapshot.Encode,
 	})
+}
+
+// NewCoordinatorWithCPU creates the production coordinator backed by the
+// trailing CPU observer.
+func NewCoordinatorWithCPU(lifecycle context.Context, source platform.Source, cpu cpuPublicationProvider, fatal func(error)) (*Coordinator, error) {
+	if source == nil || cpu == nil {
+		return nil, errors.New("platform source and CPU observer are required")
+	}
+	return newCoordinator(lifecycle, fatal, coordinatorDependencies{
+		collectors: productionCollectors{source: source}, cpu: cpu, now: time.Now,
+		withTimeout: context.WithTimeout, encode: snapshot.Encode,
+	})
+}
+
+type unavailableCPUProvider struct{}
+
+func (unavailableCPUProvider) latestCPU() (outcome[cpuPublication], time.Duration) {
+	return unavailable[cpuPublication](reasonTemporarilyUnavailable, errors.New("CPU observer is unavailable")), 0
 }
 
 func newCoordinator(lifecycle context.Context, fatal func(error), dependencies coordinatorDependencies) (*Coordinator, error) {
@@ -105,6 +126,8 @@ func newCoordinator(lifecycle context.Context, fatal func(error), dependencies c
 		return nil, errors.New("fatal notifier is required")
 	case dependencies.collectors == nil:
 		return nil, errors.New("collectors are required")
+	case dependencies.cpu == nil:
+		return nil, errors.New("CPU publication provider is required")
 	case dependencies.now == nil:
 		return nil, errors.New("wall clock is required")
 	case dependencies.withTimeout == nil:
@@ -113,7 +136,7 @@ func newCoordinator(lifecycle context.Context, fatal func(error), dependencies c
 		return nil, errors.New("snapshot encoder is required")
 	}
 	return &Coordinator{
-		lifecycle: lifecycle, collectors: dependencies.collectors, now: dependencies.now,
+		lifecycle: lifecycle, collectors: dependencies.collectors, cpu: dependencies.cpu, now: dependencies.now,
 		withTimeout: dependencies.withTimeout, encode: dependencies.encode, fatal: fatal,
 	}, nil
 }
@@ -208,11 +231,12 @@ func isInternalDefect(err error) bool {
 }
 
 type cycleObservations struct {
-	host    hostObservation
-	cpuLoad cpuLoadObservation
-	memory  outcome[memoryObservation]
-	root    outcome[filesystemObservation]
-	network outcome[networkObservation]
+	host           hostObservation
+	cpuLoad        cpuLoadObservation
+	memory         outcome[memoryObservation]
+	root           outcome[filesystemObservation]
+	network        outcome[networkObservation]
+	cpuUtilization outcome[float64]
 }
 
 func (coordinator *Coordinator) collect() (snapshot.Encoded, error) {
@@ -287,12 +311,41 @@ func (coordinator *Coordinator) collect() (snapshot.Encoded, error) {
 		}
 	}
 
-	// CPU utilization is copied last in the frozen order. It remains
-	// intentionally unavailable until the background observer exists.
+	// CPU utilization is copied last in the frozen order and never waits for
+	// the observer to acquire another sample.
 	if coordinator.lifecycle.Err() != nil {
 		return snapshot.Encoded{}, coordinator.lifecycle.Err()
 	}
+	observations.cpuUtilization = coordinator.copyCPU(observations.cpuLoad)
+	if err := validateOutcome(observations.cpuUtilization); err != nil {
+		return snapshot.Encoded{}, internalDefect(fmt.Errorf("CPU utilization publication: %w", err))
+	}
 	return coordinator.finalize(observations)
+}
+
+func (coordinator *Coordinator) copyCPU(topology cpuLoadObservation) outcome[float64] {
+	publication, now := coordinator.cpu.latestCPU()
+	if err := validateOutcome(publication); err != nil {
+		return defect[float64](err)
+	}
+	if publication.state != statePresent {
+		return outcome[float64]{state: publication.state, reason: publication.reason, cause: publication.cause}
+	}
+	value := publication.value
+	if math.IsNaN(value.utilizationPercent) || math.IsInf(value.utilizationPercent, 0) || value.utilizationPercent < 0 || value.utilizationPercent > 100 || value.topology.count == 0 || value.topology.signature == "" {
+		return defect[float64](errors.New("CPU publication is internally inconsistent"))
+	}
+	age := now - value.sampledAt
+	if age < 0 {
+		return defect[float64](errors.New("CPU publication is from the future"))
+	}
+	if age > maximumPublicationAge {
+		return unavailable[float64](reasonTemporarilyUnavailable, errors.New("CPU publication is stale"))
+	}
+	if topology.logicalCPUCount.state != statePresent || topology.logicalCPUCount.value != value.topology.count || topology.topologySignature != value.topology.signature {
+		return unavailable[float64](reasonTemporarilyUnavailable, errors.New("CPU publication topology does not match the collection cycle"))
+	}
+	return present(value.utilizationPercent)
 }
 
 func runDomain[T any](parent context.Context, withTimeout timeoutFactory, collect func(context.Context) T) (T, bool) {
@@ -312,9 +365,10 @@ func unavailableCycle(cause error) cycleObservations {
 			logicalCPUCount: unavailable[uint64](reasonTemporarilyUnavailable, cause),
 			load:            unavailable[loadObservation](reasonTemporarilyUnavailable, cause),
 		},
-		memory:  unavailable[memoryObservation](reasonTemporarilyUnavailable, cause),
-		root:    unavailable[filesystemObservation](reasonTemporarilyUnavailable, cause),
-		network: unavailable[networkObservation](reasonTemporarilyUnavailable, cause),
+		memory:         unavailable[memoryObservation](reasonTemporarilyUnavailable, cause),
+		root:           unavailable[filesystemObservation](reasonTemporarilyUnavailable, cause),
+		network:        unavailable[networkObservation](reasonTemporarilyUnavailable, cause),
+		cpuUtilization: unavailable[float64](reasonTemporarilyUnavailable, cause),
 	}
 }
 
@@ -337,6 +391,12 @@ func validateCPULoad(value cpuLoadObservation) error {
 	}
 	if value.logicalCPUCount.state == statePresent && value.logicalCPUCount.value == 0 {
 		return errors.New("present logical CPU count is zero")
+	}
+	if value.logicalCPUCount.state == statePresent && value.topologySignature == "" {
+		return errors.New("present logical CPU topology has no signature")
+	}
+	if value.logicalCPUCount.state != statePresent && value.topologySignature != "" {
+		return errors.New("unavailable logical CPU topology has a signature")
 	}
 	if err := validateOutcome(value.load); err != nil {
 		return fmt.Errorf("load outcome: %w", err)
@@ -427,7 +487,7 @@ func (coordinator *Coordinator) finalize(observations cycleObservations) (snapsh
 	appendUnavailableIssue(&document.Issues, "/raspberry_pi/undervoltage_occurred_since_boot", reasonTemporarilyUnavailable)
 
 	setNetwork(&document, observations.network)
-	appendUnavailableIssue(&document.Issues, "/cpu/utilization_percent", reasonTemporarilyUnavailable)
+	setValue(&document.CPU.UtilizationPercent, observations.cpuUtilization, "/cpu/utilization_percent", &document.Issues)
 
 	if observations.host.hostname.state != statePresent {
 		return snapshot.Encoded{}, snapshot.ErrNoUsefulSnapshot

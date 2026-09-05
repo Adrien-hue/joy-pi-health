@@ -250,6 +250,32 @@ func TestRunInternalHTTPFailureShutsDownAndExitsOne(t *testing.T) {
 	assertDiagnostic(t, stderr.String(), true, "operational error")
 }
 
+func TestProductionRuntimeShutsDownServerBeforeObserver(t *testing.T) {
+	t.Parallel()
+	server := newFakeHTTPRuntime()
+	order := make(chan string, 2)
+	server.shutdownHook = func() { order <- "server" }
+	observer := &fakeObserverRuntime{close: func(context.Context) error {
+		order <- "observer"
+		return nil
+	}}
+	runtime := &productionRuntime{server: server, observer: observer}
+	if err := runtime.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if first, second := <-order, <-order; first != "server" || second != "observer" {
+		t.Fatalf("shutdown order = %q, %q", first, second)
+	}
+}
+
+type fakeObserverRuntime struct {
+	close func(context.Context) error
+}
+
+func (observer *fakeObserverRuntime) Close(ctx context.Context) error {
+	return observer.close(ctx)
+}
+
 func dependenciesFor(ctx context.Context, server httpRuntime, startErr error) lifecycleDependencies {
 	return lifecycleDependencies{
 		signalContext: func() (context.Context, context.CancelFunc) {
@@ -312,6 +338,7 @@ type fakeHTTPRuntime struct {
 	shutdownCalls int
 	closeCalls    int
 	shutdownErr   error
+	shutdownHook  func()
 }
 
 func newFakeHTTPRuntime() *fakeHTTPRuntime {
@@ -333,7 +360,11 @@ func (s *fakeHTTPRuntime) Shutdown(context.Context) error {
 	s.mu.Lock()
 	s.shutdownCalls++
 	err := s.shutdownErr
+	hook := s.shutdownHook
 	s.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	if err == nil {
 		s.finish(nil)
 	}

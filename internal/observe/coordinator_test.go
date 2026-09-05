@@ -25,11 +25,26 @@ type collectorStub struct {
 	memFn   func(context.Context) outcome[memoryObservation]
 }
 
+type cpuProviderStub struct {
+	mu          sync.Mutex
+	publication outcome[cpuPublication]
+	now         time.Duration
+	calls       int
+}
+
+func (provider *cpuProviderStub) latestCPU() (outcome[cpuPublication], time.Duration) {
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	provider.calls++
+	return provider.publication, provider.now
+}
+
 func completeCollectorStub() *collectorStub {
 	return &collectorStub{
 		host: hostObservation{hostname: present("raspberrypi"), uptime: present(uint64(123))},
 		cpuLoad: cpuLoadObservation{
-			logicalCPUCount: present(uint64(4)),
+			logicalCPUCount:   present(uint64(4)),
+			topologySignature: "0-3",
 			load: present(loadObservation{
 				oneMinute: 0.1, fiveMinutes: 0.2, fifteenMinutes: 0.3,
 			}),
@@ -129,10 +144,106 @@ func TestCoordinatorBuildsGenericPartialSnapshot(t *testing.T) {
 	}
 }
 
+func TestCoordinatorCopiesValidCPUPublicationLast(t *testing.T) {
+	t.Parallel()
+	collectors := completeCollectorStub()
+	cpu := &cpuProviderStub{publication: present(cpuPublication{
+		utilizationPercent: 37.5, sampledAt: time.Second, topology: cpuTopology{count: 4, signature: "0-3"},
+	}), now: time.Second + maximumPublicationAge}
+	coordinator := mustTestCoordinatorWithCPU(t, context.Background(), collectors, cpu)
+
+	encoded, err := coordinator.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := decodeDocument(t, encoded)
+	if got := document["cpu"].(map[string]any)["utilization_percent"]; got != 37.5 {
+		t.Errorf("utilization_percent = %v; want 37.5", got)
+	}
+	issues := document["issues"].([]any)
+	for _, raw := range issues {
+		if raw.(map[string]any)["path"] == "/cpu/utilization_percent" {
+			t.Error("valid CPU publication retained an unavailable issue")
+		}
+	}
+	if cpu.calls != 1 {
+		t.Errorf("CPU publication calls = %d; want 1", cpu.calls)
+	}
+}
+
+func TestCoordinatorRejectsStaleAndMismatchedCPUPublications(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		publication cpuPublication
+		now         time.Duration
+	}{
+		{
+			name: "older than maximum age",
+			publication: cpuPublication{utilizationPercent: 1, sampledAt: time.Second,
+				topology: cpuTopology{count: 4, signature: "0-3"}},
+			now: time.Second + maximumPublicationAge + 1,
+		},
+		{
+			name: "logical count mismatch",
+			publication: cpuPublication{utilizationPercent: 1, sampledAt: time.Second,
+				topology: cpuTopology{count: 2, signature: "0-1"}},
+			now: time.Second,
+		},
+		{
+			name: "identity mismatch with same count",
+			publication: cpuPublication{utilizationPercent: 1, sampledAt: time.Second,
+				topology: cpuTopology{count: 4, signature: "1-4"}},
+			now: time.Second,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			coordinator := mustTestCoordinatorWithCPU(t, context.Background(), completeCollectorStub(), &cpuProviderStub{
+				publication: present(test.publication), now: test.now,
+			})
+			encoded, err := coordinator.Snapshot(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			document := decodeDocument(t, encoded)
+			if got := document["cpu"].(map[string]any)["utilization_percent"]; got != nil {
+				t.Errorf("utilization_percent = %v; want null", got)
+			}
+			issues := document["issues"].([]any)
+			if got := issues[len(issues)-1].(map[string]any)["path"]; got != "/cpu/utilization_percent" {
+				t.Errorf("last issue = %v", got)
+			}
+		})
+	}
+}
+
+func TestCoordinatorCPUDefectInvalidatesCycle(t *testing.T) {
+	t.Parallel()
+	fatal := make(chan error, 1)
+	coordinator, err := newCoordinator(context.Background(), func(err error) { fatal <- err }, coordinatorDependencies{
+		collectors: completeCollectorStub(),
+		cpu:        &cpuProviderStub{publication: defect[cpuPublication](errors.New("observer invariant"))},
+		now:        time.Now, withTimeout: context.WithTimeout, encode: snapshot.Encode,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Snapshot(context.Background()); !isInternalDefect(err) {
+		t.Fatalf("Snapshot() error = %v; want internal defect", err)
+	}
+	select {
+	case <-fatal:
+	case <-time.After(time.Second):
+		t.Fatal("CPU defect did not trigger fatal notification")
+	}
+}
+
 func TestCoordinatorMapsExpectedReasonsInFrozenOrder(t *testing.T) {
 	t.Parallel()
 	collectors := completeCollectorStub()
 	collectors.cpuLoad.logicalCPUCount = unavailable[uint64](reasonPermissionDenied, errors.New("denied"))
+	collectors.cpuLoad.topologySignature = ""
 	collectors.cpuLoad.load = unavailable[loadObservation](reasonTemporarilyUnavailable, errors.New("bad data"))
 	collectors.memory = unavailable[memoryObservation](reasonPermissionDenied, errors.New("denied"))
 	collectors.root = unavailable[filesystemObservation](reasonUnsupported, errors.New("missing"))
@@ -235,6 +346,7 @@ func TestCoordinatorRejectsZeroUsefulLeaves(t *testing.T) {
 	cause := errors.New("unavailable")
 	collectors.host.uptime = unavailable[uint64](reasonTemporarilyUnavailable, cause)
 	collectors.cpuLoad.logicalCPUCount = unavailable[uint64](reasonTemporarilyUnavailable, cause)
+	collectors.cpuLoad.topologySignature = ""
 	collectors.cpuLoad.load = unavailable[loadObservation](reasonTemporarilyUnavailable, cause)
 	collectors.memory = unavailable[memoryObservation](reasonTemporarilyUnavailable, cause)
 	collectors.root = unavailable[filesystemObservation](reasonTemporarilyUnavailable, cause)
@@ -261,7 +373,15 @@ func TestJoinedRequestsShareOneCycleAndEncoding(t *testing.T) {
 		encodeCalls.Add(1)
 		return snapshot.Encode(input)
 	}
-	coordinator := mustTestCoordinator(t, context.Background(), collectors, func(error) {}, time.Now, context.WithTimeout, encode)
+	cpu := &cpuProviderStub{publication: present(cpuPublication{
+		utilizationPercent: 25, sampledAt: time.Second, topology: cpuTopology{count: 4, signature: "0-3"},
+	}), now: time.Second}
+	coordinator, err := newCoordinator(context.Background(), func(error) {}, coordinatorDependencies{
+		collectors: collectors, cpu: cpu, now: time.Now, withTimeout: context.WithTimeout, encode: encode,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	const requestCount = 8
 	results := make(chan snapshot.Encoded, requestCount)
@@ -304,6 +424,9 @@ func TestJoinedRequestsShareOneCycleAndEncoding(t *testing.T) {
 	}
 	if encodeCalls.Load() != 1 {
 		t.Errorf("encode calls = %d; want 1", encodeCalls.Load())
+	}
+	if cpu.calls != 1 {
+		t.Errorf("CPU publication calls = %d; want 1", cpu.calls)
 	}
 	if len(collectors.recordedCalls()) != 5 {
 		t.Errorf("collector calls = %v", collectors.recordedCalls())
@@ -510,7 +633,18 @@ func TestNextRequestStartsFreshCycle(t *testing.T) {
 func mustTestCoordinator(t *testing.T, lifecycle context.Context, collectors cycleCollectors, fatal func(error), now func() time.Time, withTimeout timeoutFactory, encode snapshotEncoder) *Coordinator {
 	t.Helper()
 	coordinator, err := newCoordinator(lifecycle, fatal, coordinatorDependencies{
-		collectors: collectors, now: now, withTimeout: withTimeout, encode: encode,
+		collectors: collectors, cpu: unavailableCPUProvider{}, now: now, withTimeout: withTimeout, encode: encode,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return coordinator
+}
+
+func mustTestCoordinatorWithCPU(t *testing.T, lifecycle context.Context, collectors cycleCollectors, cpu cpuPublicationProvider) *Coordinator {
+	t.Helper()
+	coordinator, err := newCoordinator(lifecycle, func(err error) { t.Errorf("unexpected fatal notification: %v", err) }, coordinatorDependencies{
+		collectors: collectors, cpu: cpu, now: time.Now, withTimeout: context.WithTimeout, encode: snapshot.Encode,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -15,17 +16,21 @@ import (
 
 const (
 	uptimePath    = "/proc/uptime"
+	cpuStatPath   = "/proc/stat"
+	bootIDPath    = "/proc/sys/kernel/random/boot_id"
 	cpuOnlinePath = "/sys/devices/system/cpu/online"
 	loadPath      = "/proc/loadavg"
 	memoryPath    = "/proc/meminfo"
 	networkPath   = "/sys/class/net"
 	rootPath      = "/"
 
-	maximumUptimeBytes = 128
-	maximumCPUBytes    = 4 * 1024
-	maximumLoadBytes   = 256
-	maximumMemoryBytes = 64 * 1024
-	maximumLinks       = 64
+	maximumUptimeBytes  = 128
+	maximumCPUStatBytes = 512
+	maximumBootIDBytes  = 128
+	maximumCPUBytes     = 4 * 1024
+	maximumLoadBytes    = 256
+	maximumMemoryBytes  = 64 * 1024
+	maximumLinks        = 64
 )
 
 type LinuxSource struct{}
@@ -33,11 +38,15 @@ type LinuxSource struct{}
 func NewLinuxSource() LinuxSource { return LinuxSource{} }
 
 // NewSource returns the production source for the supported Linux runtime.
-func NewSource() Source { return NewLinuxSource() }
+func NewSource() ProductionSource { return NewLinuxSource() }
 
 func (LinuxSource) Hostname() (string, error)  { return os.Hostname() }
 func (LinuxSource) Uptime() ([]byte, error)    { return readBounded(uptimePath, maximumUptimeBytes) }
 func (LinuxSource) CPUOnline() ([]byte, error) { return readBounded(cpuOnlinePath, maximumCPUBytes) }
+func (LinuxSource) CPUStat() ([]byte, error) {
+	return readFirstLineBounded(cpuStatPath, maximumCPUStatBytes)
+}
+func (LinuxSource) BootID() ([]byte, error) { return readBounded(bootIDPath, maximumBootIDBytes) }
 func (LinuxSource) LoadAverage() ([]byte, error) {
 	return readBounded(loadPath, maximumLoadBytes)
 }
@@ -98,6 +107,23 @@ func readBounded(path string, maximum int64) ([]byte, error) {
 	}
 	if int64(len(data)) > maximum {
 		return nil, fmt.Errorf("%s exceeds %d bytes", path, maximum)
+	}
+	return data, nil
+}
+
+func readFirstLineBounded(path string, maximum int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	reader := bufio.NewReader(io.LimitReader(file, maximum+1))
+	data, err := reader.ReadBytes('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	if int64(len(data)) > maximum || len(data) == 0 {
+		return nil, fmt.Errorf("%s first line is empty or exceeds %d bytes", path, maximum)
 	}
 	return data, nil
 }

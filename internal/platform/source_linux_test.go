@@ -16,6 +16,7 @@ func TestLinuxSourceReadsHostSources(t *testing.T) {
 	}
 	for name, read := range map[string]func() ([]byte, error){
 		"uptime": source.Uptime, "CPU online": source.CPUOnline,
+		"CPU stat": source.CPUStat, "boot ID": source.BootID,
 		"load average": source.LoadAverage, "memory info": source.MemoryInfo,
 	} {
 		if data, err := read(); err != nil || len(data) == 0 {
@@ -40,5 +41,18 @@ func TestReadBounded(t *testing.T) {
 	}
 	if _, err := readBounded(path, 4); err == nil {
 		t.Fatal("readBounded() accepted oversized input")
+	}
+}
+
+func TestReadFirstLineBounded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source")
+	if err := os.WriteFile(path, []byte("first\nsecond line is ignored\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := readFirstLineBounded(path, 6); err != nil || string(got) != "first\n" {
+		t.Fatalf("readFirstLineBounded() = %q, %v", got, err)
+	}
+	if _, err := readFirstLineBounded(path, 5); err == nil {
+		t.Fatal("readFirstLineBounded() accepted oversized first line")
 	}
 }

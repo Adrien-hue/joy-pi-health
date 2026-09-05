@@ -19,6 +19,22 @@ type Source interface {
 	Links(context.Context) ([]Link, error)
 }
 
+// CPUSource is the finite platform boundary required by the trailing CPU
+// utilization observer.
+type CPUSource interface {
+	CPUStat() ([]byte, error)
+	BootID() ([]byte, error)
+	Uptime() ([]byte, error)
+	CPUOnline() ([]byte, error)
+}
+
+// ProductionSource is the complete read-only platform surface used by the
+// production application.
+type ProductionSource interface {
+	Source
+	CPUSource
+}
+
 type Filesystem struct {
 	BlockSize       uint64
 	TotalBlocks     uint64
