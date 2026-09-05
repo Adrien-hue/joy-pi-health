@@ -6,7 +6,7 @@ The service will expose one current snapshot of CPU, load, memory, root-filesyst
 
 ## Project status
 
-The v0.1 requirements and architecture are frozen and approved. The initial Go repository foundation exists, but the service is not operational and metric collection has not started. There is currently no runnable service or release artifact.
+The v0.1 requirements and architecture are frozen and approved. The Go repository and configuration foundation exist, but the service is not operational and metric collection has not started. There is currently no runnable service or release artifact.
 
 Canonical repository and Go module path:
 
@@ -42,6 +42,12 @@ go build ./...
 ```
 
 `go version` must report Go 1.27.1, and the module-tidiness and formatting checks must produce no output. Running Joy Pi Health is not supported yet; the executable is only a startup boundary for subsequent implementation.
+
+The implemented command-line configuration can be inspected with:
+
+```text
+go run ./cmd/joy-pi-health --help
+```
 
 ## License
 
