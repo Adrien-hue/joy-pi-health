@@ -268,6 +268,22 @@ func TestProductionRuntimeShutsDownServerBeforeObserver(t *testing.T) {
 	}
 }
 
+func TestProductionRuntimeShutsDownFirmwareAfterCPUObserver(t *testing.T) {
+	t.Parallel()
+	server := newFakeHTTPRuntime()
+	order := make(chan string, 3)
+	server.shutdownHook = func() { order <- "server" }
+	observer := &fakeObserverRuntime{close: func(context.Context) error { order <- "observer"; return nil }}
+	firmware := &fakeObserverRuntime{close: func(context.Context) error { order <- "firmware"; return nil }}
+	runtime := &productionRuntime{server: server, observer: observer, firmware: firmware}
+	if err := runtime.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if first, second, third := <-order, <-order, <-order; first != "server" || second != "observer" || third != "firmware" {
+		t.Fatalf("shutdown order = %q, %q, %q", first, second, third)
+	}
+}
+
 type fakeObserverRuntime struct {
 	close func(context.Context) error
 }

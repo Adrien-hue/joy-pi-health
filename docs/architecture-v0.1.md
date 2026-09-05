@@ -402,4 +402,19 @@ No unresolved architecture decision blocks implementation planning.
 
 The standard-library server retains ownership of failures that occur before handler dispatch. Its header-limit rejection may emit its native connection-closing `431` response rather than an application JSON envelope. HTTP also suppresses the body for unsupported `HEAD /v1/snapshot` responses; the status remains `405` with `Allow: GET`. No custom HTTP pre-parser or HEAD-specific transport is introduced for these cases.
 
+### Approved v0.1 firmware-ioctl erratum
+
+The Linux/ARM64 firmware ioctl adapter may use the minimum unavoidable `unsafe.Pointer` conversion required to pass its bounded mailbox buffer across the `IOCTL_MBOX_PROPERTY` syscall ABI. This is an ABI necessity, not a performance optimization, and is the sole approved exception to the Section 14 prohibition on unsafe conversions.
+
+The exception is constrained as follows:
+
+- it exists only inside the Linux/ARM64 firmware ioctl adapter and only at the syscall boundary;
+- it performs no unsafe arithmetic and no unsafe string/byte conversion;
+- the mailbox buffer remains live for the complete syscall;
+- the conversion is documented locally with why it is required and which ABI it satisfies;
+- protocol construction and response validation remain platform-neutral, safe Go and are exercised without unsafe code;
+- observation, coordination, HTTP, and all other platform code remain free of unsafe code;
+- `golang.org/x/sys/unix` is not added solely to conceal the conversion in a dependency; and
+- any additional unsafe use requires a separate explicit architecture review.
+
 This document is frozen. A material change—such as a new dependency, endpoint, background task, cache, process, protocol, public Go package, or privilege—requires explicit architecture review and corresponding requirements/API review where applicable. Future releases receive self-contained versioned architecture documents; v0.1 corrections must be labelled as errata.

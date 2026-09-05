@@ -98,14 +98,25 @@ func startHTTP(ctx context.Context, resolved config.Config, fatal func(error), e
 	if err != nil {
 		return nil, err
 	}
-	provider, err := observe.NewCoordinatorWithCPU(ctx, source, observer, fatal)
+	firmware, err := observe.NewFirmwareExecutor(platform.NewFirmwareTransaction(), fatal)
 	if err != nil {
 		_ = observer.Close(context.Background())
+		return nil, err
+	}
+	if err := firmware.Start(); err != nil {
+		_ = observer.Close(context.Background())
+		return nil, err
+	}
+	provider, err := observe.NewCoordinatorWithRaspberryPi(ctx, source, observer, platform.NewThermalSource(), firmware, fatal)
+	if err != nil {
+		_ = observer.Close(context.Background())
+		_ = firmware.Close(context.Background())
 		return nil, err
 	}
 	server, err := httpapi.Listen(ctx, resolved.ListenAddress(), resolved.ListenPort(), provider, fatal, errorOutput)
 	if err != nil {
 		_ = observer.Close(context.Background())
+		_ = firmware.Close(context.Background())
 		return nil, err
 	}
 	if err := observer.Start(); err != nil {
@@ -113,9 +124,10 @@ func startHTTP(ctx context.Context, resolved config.Config, fatal func(error), e
 		closeContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		_ = observer.Close(closeContext)
+		_ = firmware.Close(closeContext)
 		return nil, err
 	}
-	return &productionRuntime{server: server, observer: observer}, nil
+	return &productionRuntime{server: server, observer: observer, firmware: firmware}, nil
 }
 
 func shutDown(server httpRuntime, serveResult <-chan error, stderr io.Writer) int {

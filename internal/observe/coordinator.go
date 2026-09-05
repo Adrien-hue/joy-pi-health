@@ -26,11 +26,13 @@ type cycleCollectors interface {
 	CollectCPULoad(context.Context) cpuLoadObservation
 	CollectMemory(context.Context) outcome[memoryObservation]
 	CollectRootFilesystem(context.Context) outcome[filesystemObservation]
+	CollectRaspberryPi(context.Context, *cycleToken) raspberryPiObservation
 	CollectNetwork(context.Context) outcome[networkObservation]
 }
 
 type productionCollectors struct {
-	source platform.Source
+	source      platform.Source
+	raspberryPi raspberryPiCollector
 }
 
 func (collectors productionCollectors) CollectHost(ctx context.Context) hostObservation {
@@ -47,6 +49,10 @@ func (collectors productionCollectors) CollectMemory(ctx context.Context) outcom
 
 func (collectors productionCollectors) CollectRootFilesystem(ctx context.Context) outcome[filesystemObservation] {
 	return collectRootFilesystem(ctx, collectors.source)
+}
+
+func (collectors productionCollectors) CollectRaspberryPi(ctx context.Context, token *cycleToken) raspberryPiObservation {
+	return collectors.raspberryPi.Collect(ctx, token)
 }
 
 func (collectors productionCollectors) CollectNetwork(ctx context.Context) outcome[networkObservation] {
@@ -81,9 +87,14 @@ type Coordinator struct {
 }
 
 type collectionCycle struct {
+	token   *cycleToken
 	done    chan struct{}
 	encoded snapshot.Encoded
 	err     error
+}
+
+type cycleToken struct {
+	identity byte
 }
 
 // NewCoordinator creates the production generic observation coordinator.
@@ -92,7 +103,7 @@ func NewCoordinator(lifecycle context.Context, source platform.Source, fatal fun
 		return nil, errors.New("platform source is required")
 	}
 	return newCoordinator(lifecycle, fatal, coordinatorDependencies{
-		collectors:  productionCollectors{source: source},
+		collectors:  productionCollectors{source: source, raspberryPi: unavailableRaspberryPiCollector{}},
 		cpu:         unavailableCPUProvider{},
 		now:         time.Now,
 		withTimeout: context.WithTimeout,
@@ -107,8 +118,20 @@ func NewCoordinatorWithCPU(lifecycle context.Context, source platform.Source, cp
 		return nil, errors.New("platform source and CPU observer are required")
 	}
 	return newCoordinator(lifecycle, fatal, coordinatorDependencies{
-		collectors: productionCollectors{source: source}, cpu: cpu, now: time.Now,
+		collectors: productionCollectors{source: source, raspberryPi: unavailableRaspberryPiCollector{}}, cpu: cpu, now: time.Now,
 		withTimeout: context.WithTimeout, encode: snapshot.Encode,
+	})
+}
+
+// NewCoordinatorWithRaspberryPi creates the production coordinator backed by
+// both long-lived observers.
+func NewCoordinatorWithRaspberryPi(lifecycle context.Context, source platform.Source, cpu cpuPublicationProvider, thermal platform.ThermalSource, firmware firmwareObservationProvider, fatal func(error)) (*Coordinator, error) {
+	if source == nil || cpu == nil || thermal == nil || firmware == nil {
+		return nil, errors.New("platform sources and observers are required")
+	}
+	return newCoordinator(lifecycle, fatal, coordinatorDependencies{
+		collectors: productionCollectors{source: source, raspberryPi: productionRaspberryPiCollector{thermal: thermal, firmware: firmware}},
+		cpu:        cpu, now: time.Now, withTimeout: context.WithTimeout, encode: snapshot.Encode,
 	})
 }
 
@@ -159,7 +182,7 @@ func (coordinator *Coordinator) Snapshot(request context.Context) (snapshot.Enco
 	}
 	cycle := coordinator.active
 	if cycle == nil {
-		cycle = &collectionCycle{done: make(chan struct{})}
+		cycle = &collectionCycle{token: &cycleToken{identity: 1}, done: make(chan struct{})}
 		coordinator.active = cycle
 		go coordinator.run(cycle)
 	}
@@ -197,7 +220,7 @@ func (coordinator *Coordinator) run(cycle *collectionCycle) {
 			coordinator.fatalOnce.Do(func() { coordinator.fatal(resultErr) })
 		}
 	}()
-	encoded, resultErr = coordinator.collect()
+	encoded, resultErr = coordinator.collect(cycle.token)
 }
 
 func (coordinator *Coordinator) fail(err error) error {
@@ -235,11 +258,12 @@ type cycleObservations struct {
 	cpuLoad        cpuLoadObservation
 	memory         outcome[memoryObservation]
 	root           outcome[filesystemObservation]
+	raspberryPi    raspberryPiObservation
 	network        outcome[networkObservation]
 	cpuUtilization outcome[float64]
 }
 
-func (coordinator *Coordinator) collect() (snapshot.Encoded, error) {
+func (coordinator *Coordinator) collect(token *cycleToken) (snapshot.Encoded, error) {
 	cycleContext, cancelCycle := coordinator.withTimeout(coordinator.lifecycle, collectionCycleTimeout)
 	defer cancelCycle()
 
@@ -295,8 +319,20 @@ func (coordinator *Coordinator) collect() (snapshot.Encoded, error) {
 		}
 	}
 
-	// Raspberry Pi collection occupies this fixed position in the cycle. Its
-	// fields remain intentionally unavailable until the production collectors exist.
+	if coordinator.lifecycle.Err() != nil {
+		return snapshot.Encoded{}, coordinator.lifecycle.Err()
+	}
+	if cycleContext.Err() == nil {
+		value, expired := runDomain(cycleContext, coordinator.withTimeout, func(ctx context.Context) raspberryPiObservation {
+			return coordinator.collectors.CollectRaspberryPi(ctx, token)
+		})
+		if err := validateRaspberryPi(value); err != nil {
+			return snapshot.Encoded{}, internalDefect(err)
+		}
+		if !expired {
+			observations.raspberryPi = value
+		}
+	}
 
 	if coordinator.lifecycle.Err() != nil {
 		return snapshot.Encoded{}, coordinator.lifecycle.Err()
@@ -365,8 +401,12 @@ func unavailableCycle(cause error) cycleObservations {
 			logicalCPUCount: unavailable[uint64](reasonTemporarilyUnavailable, cause),
 			load:            unavailable[loadObservation](reasonTemporarilyUnavailable, cause),
 		},
-		memory:         unavailable[memoryObservation](reasonTemporarilyUnavailable, cause),
-		root:           unavailable[filesystemObservation](reasonTemporarilyUnavailable, cause),
+		memory: unavailable[memoryObservation](reasonTemporarilyUnavailable, cause),
+		root:   unavailable[filesystemObservation](reasonTemporarilyUnavailable, cause),
+		raspberryPi: raspberryPiObservation{
+			temperature: unavailable[float64](reasonTemporarilyUnavailable, cause),
+			firmware:    unavailable[firmwareHealth](reasonTemporarilyUnavailable, cause),
+		},
 		network:        unavailable[networkObservation](reasonTemporarilyUnavailable, cause),
 		cpuUtilization: unavailable[float64](reasonTemporarilyUnavailable, cause),
 	}
@@ -480,11 +520,8 @@ func (coordinator *Coordinator) finalize(observations cycleObservations) (snapsh
 	setMemory(&document.Memory, observations.memory, "/memory", &document.Issues)
 	setRootFilesystem(&document.RootFilesystem, observations.root, "/root_filesystem", &document.Issues)
 
-	appendUnavailableIssue(&document.Issues, "/raspberry_pi/soc_temperature_celsius", reasonTemporarilyUnavailable)
-	appendUnavailableIssue(&document.Issues, "/raspberry_pi/thermal_throttling_active", reasonTemporarilyUnavailable)
-	appendUnavailableIssue(&document.Issues, "/raspberry_pi/thermal_throttling_occurred_since_boot", reasonTemporarilyUnavailable)
-	appendUnavailableIssue(&document.Issues, "/raspberry_pi/undervoltage_active", reasonTemporarilyUnavailable)
-	appendUnavailableIssue(&document.Issues, "/raspberry_pi/undervoltage_occurred_since_boot", reasonTemporarilyUnavailable)
+	setValue(&document.RaspberryPi.SoCTemperatureCelsius, observations.raspberryPi.temperature, "/raspberry_pi/soc_temperature_celsius", &document.Issues)
+	setFirmware(&document, observations.raspberryPi.firmware)
 
 	setNetwork(&document, observations.network)
 	setValue(&document.CPU.UtilizationPercent, observations.cpuUtilization, "/cpu/utilization_percent", &document.Issues)
@@ -498,6 +535,25 @@ func (coordinator *Coordinator) finalize(observations cycleObservations) (snapsh
 		return encoded, err
 	}
 	return snapshot.Encoded{}, internalDefect(fmt.Errorf("finalize snapshot: %w", err))
+}
+
+func setFirmware(document *snapshot.Snapshot, result outcome[firmwareHealth]) {
+	paths := []string{
+		"/raspberry_pi/thermal_throttling_active",
+		"/raspberry_pi/thermal_throttling_occurred_since_boot",
+		"/raspberry_pi/undervoltage_active",
+		"/raspberry_pi/undervoltage_occurred_since_boot",
+	}
+	if result.state != statePresent {
+		for _, path := range paths {
+			appendUnavailableIssue(&document.Issues, path, result.reason)
+		}
+		return
+	}
+	document.RaspberryPi.ThermalThrottlingActive = pointer(result.value.thermalThrottlingActive)
+	document.RaspberryPi.ThermalThrottlingOccurredSinceBoot = pointer(result.value.thermalThrottlingOccurredSinceBoot)
+	document.RaspberryPi.UndervoltageActive = pointer(result.value.undervoltageActive)
+	document.RaspberryPi.UndervoltageOccurredSinceBoot = pointer(result.value.undervoltageOccurredSinceBoot)
 }
 
 func setLoad(document *snapshot.Snapshot, result outcome[loadObservation]) {

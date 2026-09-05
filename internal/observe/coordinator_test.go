@@ -20,6 +20,7 @@ type collectorStub struct {
 	cpuLoad cpuLoadObservation
 	memory  outcome[memoryObservation]
 	root    outcome[filesystemObservation]
+	pi      raspberryPiObservation
 	network outcome[networkObservation]
 	hostFn  func(context.Context) hostObservation
 	memFn   func(context.Context) outcome[memoryObservation]
@@ -51,6 +52,7 @@ func completeCollectorStub() *collectorStub {
 		},
 		memory: present(memoryObservation{totalBytes: 1024, availableBytes: 256, usedBytes: 768}),
 		root:   present(filesystemObservation{totalBytes: 4096, availableBytes: 1024, usedBytes: 3072}),
+		pi:     unavailableRaspberryPiCollector{}.Collect(context.Background(), &cycleToken{identity: 1}),
 		network: present(networkObservation{interfaces: []networkInterfaceObservation{{
 			name: "eth0", state: present("up"), rxBytes: present(uint64(1<<53 + 1)), txBytes: present(^uint64(0)),
 		}}}),
@@ -87,6 +89,11 @@ func (collectors *collectorStub) CollectMemory(ctx context.Context) outcome[memo
 func (collectors *collectorStub) CollectRootFilesystem(context.Context) outcome[filesystemObservation] {
 	collectors.record("root")
 	return collectors.root
+}
+
+func (collectors *collectorStub) CollectRaspberryPi(context.Context, *cycleToken) raspberryPiObservation {
+	collectors.record("raspberry_pi")
+	return collectors.pi
 }
 
 func (collectors *collectorStub) CollectNetwork(context.Context) outcome[networkObservation] {
@@ -141,6 +148,79 @@ func TestCoordinatorBuildsGenericPartialSnapshot(t *testing.T) {
 		if value != nil {
 			t.Errorf("raspberry_pi.%s = %v; want null", field, value)
 		}
+	}
+}
+
+func TestCoordinatorPublishesRaspberryPiMetrics(t *testing.T) {
+	t.Parallel()
+	collectors := completeCollectorStub()
+	collectors.pi = raspberryPiObservation{
+		temperature: present(47.125),
+		firmware: present(firmwareHealth{
+			thermalThrottlingActive:            false,
+			thermalThrottlingOccurredSinceBoot: true,
+			undervoltageActive:                 false,
+			undervoltageOccurredSinceBoot:      true,
+		}),
+	}
+	coordinator := mustTestCoordinator(t, context.Background(), collectors, func(error) {}, time.Now, context.WithTimeout, snapshot.Encode)
+	encoded, err := coordinator.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := decodeDocument(t, encoded)
+	pi := document["raspberry_pi"].(map[string]any)
+	if pi["soc_temperature_celsius"] != 47.125 || pi["thermal_throttling_active"] != false || pi["thermal_throttling_occurred_since_boot"] != true || pi["undervoltage_active"] != false || pi["undervoltage_occurred_since_boot"] != true {
+		t.Fatalf("raspberry_pi = %#v", pi)
+	}
+	issues := document["issues"].([]any)
+	if len(issues) != 1 || issues[0].(map[string]any)["path"] != "/cpu/utilization_percent" {
+		t.Fatalf("issues = %#v", issues)
+	}
+}
+
+func TestCoordinatorKeepsTemperatureAndFirmwareFailuresIndependent(t *testing.T) {
+	t.Parallel()
+	collectors := completeCollectorStub()
+	collectors.pi = raspberryPiObservation{
+		temperature: unavailable[float64](reasonPermissionDenied, errors.New("denied")),
+		firmware:    present(firmwareHealth{}),
+	}
+	coordinator := mustTestCoordinator(t, context.Background(), collectors, func(error) {}, time.Now, context.WithTimeout, snapshot.Encode)
+	encoded, err := coordinator.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := decodeDocument(t, encoded)
+	pi := document["raspberry_pi"].(map[string]any)
+	if pi["soc_temperature_celsius"] != nil || pi["thermal_throttling_active"] != false || pi["undervoltage_active"] != false {
+		t.Fatalf("raspberry_pi = %#v", pi)
+	}
+	first := document["issues"].([]any)[0].(map[string]any)
+	if first["path"] != "/raspberry_pi/soc_temperature_celsius" || first["code"] != "permission_denied" {
+		t.Fatalf("first issue = %#v", first)
+	}
+}
+
+func TestCoordinatorTreatsFirmwareDefectAsCycleFatal(t *testing.T) {
+	t.Parallel()
+	collectors := completeCollectorStub()
+	collectors.pi = raspberryPiObservation{
+		temperature: present(40.0),
+		firmware:    defect[firmwareHealth](errors.New("broken executor state")),
+	}
+	fatal := make(chan error, 1)
+	coordinator := mustTestCoordinator(t, context.Background(), collectors, func(err error) { fatal <- err }, time.Now, context.WithTimeout, snapshot.Encode)
+	if _, err := coordinator.Snapshot(context.Background()); !isInternalDefect(err) {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	select {
+	case err := <-fatal:
+		if !isInternalDefect(err) {
+			t.Fatalf("fatal error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fatal notification was not delivered")
 	}
 }
 
@@ -319,7 +399,7 @@ func TestHostnameFailureDoesNotHideLaterDefect(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("fatal notification was not delivered")
 	}
-	wantCalls := []string{"host", "cpu_load", "memory", "root", "network"}
+	wantCalls := []string{"host", "cpu_load", "memory", "root", "raspberry_pi", "network"}
 	if got := collectors.recordedCalls(); !equalStrings(got, wantCalls) {
 		t.Errorf("collector calls = %v; want %v", got, wantCalls)
 	}
@@ -335,7 +415,7 @@ func TestExpectedHostnameFailureReturnsUnavailableAfterFullCycle(t *testing.T) {
 	if !errors.Is(err, snapshot.ErrNoUsefulSnapshot) {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if len(collectors.recordedCalls()) != 5 {
+	if len(collectors.recordedCalls()) != 6 {
 		t.Fatalf("collector calls = %v", collectors.recordedCalls())
 	}
 }
@@ -428,7 +508,7 @@ func TestJoinedRequestsShareOneCycleAndEncoding(t *testing.T) {
 	if cpu.calls != 1 {
 		t.Errorf("CPU publication calls = %d; want 1", cpu.calls)
 	}
-	if len(collectors.recordedCalls()) != 5 {
+	if len(collectors.recordedCalls()) != 6 {
 		t.Errorf("collector calls = %v", collectors.recordedCalls())
 	}
 }
@@ -466,7 +546,7 @@ func TestRequesterCancellationDoesNotCancelSharedCycle(t *testing.T) {
 	if err := <-joinedResult; err != nil {
 		t.Fatal(err)
 	}
-	if len(collectors.recordedCalls()) != 5 {
+	if len(collectors.recordedCalls()) != 6 {
 		t.Errorf("collector calls = %v", collectors.recordedCalls())
 	}
 }
@@ -625,7 +705,7 @@ func TestNextRequestStartsFreshCycle(t *testing.T) {
 	if bytes.Equal(encodedBytes(t, first), encodedBytes(t, second)) {
 		t.Error("fresh cycle reused the prior encoded result")
 	}
-	if encodeCalls.Load() != 2 || len(collectors.recordedCalls()) != 10 {
+	if encodeCalls.Load() != 2 || len(collectors.recordedCalls()) != 12 {
 		t.Errorf("encode calls = %d, collector calls = %v", encodeCalls.Load(), collectors.recordedCalls())
 	}
 }

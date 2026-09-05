@@ -8,6 +8,8 @@ import (
 
 var ErrTooManyLinks = errors.New("network interface limit exceeded")
 
+var ErrMalformedFirmwareResponse = errors.New("malformed firmware response")
+
 // Source is the finite platform boundary required by the v0.1 generic collectors.
 type Source interface {
 	Hostname() (string, error)
@@ -33,6 +35,19 @@ type CPUSource interface {
 type ProductionSource interface {
 	Source
 	CPUSource
+}
+
+// ThermalSource is the bounded platform surface used to locate and read the
+// Raspberry Pi CPU thermal zone.
+type ThermalSource interface {
+	ThermalZoneNames() ([]string, error)
+	ThermalZoneType(string) ([]byte, error)
+	ThermalZoneTemperature(string) ([]byte, error)
+}
+
+// FirmwareTransaction performs one coherent, read-only firmware health query.
+type FirmwareTransaction interface {
+	GetThrottled() (uint32, error)
 }
 
 type Filesystem struct {
