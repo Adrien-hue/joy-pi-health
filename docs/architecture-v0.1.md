@@ -398,4 +398,8 @@ No unresolved architecture decision blocks implementation planning.
 
 ## 17. Change control
 
+### Approved v0.1 transport errata
+
+The standard-library server retains ownership of failures that occur before handler dispatch. Its header-limit rejection may emit its native connection-closing `431` response rather than an application JSON envelope. HTTP also suppresses the body for unsupported `HEAD /v1/snapshot` responses; the status remains `405` with `Allow: GET`. No custom HTTP pre-parser or HEAD-specific transport is introduced for these cases.
+
 This document is frozen. A material change—such as a new dependency, endpoint, background task, cache, process, protocol, public Go package, or privilege—requires explicit architecture review and corresponding requirements/API review where applicable. Future releases receive self-contained versioned architecture documents; v0.1 corrections must be labelled as errata.

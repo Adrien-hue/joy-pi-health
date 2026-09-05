@@ -1,18 +1,21 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-func TestListenServesTemporaryNotFound(t *testing.T) {
-	server, err := Listen(context.Background(), netip.MustParseAddr("127.0.0.1"), 0, io.Discard)
+func TestListenServesSnapshotContract(t *testing.T) {
+	server, err := Listen(context.Background(), netip.MustParseAddr("127.0.0.1"), 0, unavailableProvider{}, func(error) {}, io.Discard)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
 	}
@@ -24,8 +27,41 @@ func TestListenServesTemporaryNotFound(t *testing.T) {
 		t.Fatalf("GET /v1/snapshot error = %v", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusNotFound {
-		t.Errorf("GET /v1/snapshot status = %d, want %d", response.StatusCode, http.StatusNotFound)
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("GET /v1/snapshot status = %d, want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+func TestOversizedHeadersUseTransportGenerated431(t *testing.T) {
+	server, err := Listen(context.Background(), netip.MustParseAddr("127.0.0.1"), 0, unavailableProvider{}, func(error) {}, io.Discard)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	done := serveInBackground(server)
+	t.Cleanup(func() { closeServer(t, server, done) })
+
+	connection, err := net.DialTimeout("tcp4", server.address().String(), time.Second)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer connection.Close()
+	if err := connection.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetDeadline() error = %v", err)
+	}
+	request := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nX-Oversized: %s\r\n\r\n", snapshotPath, server.address().String(), strings.Repeat("x", maximumHeaderBytes+8*1024))
+	if _, err := io.WriteString(connection, request); err != nil {
+		t.Fatalf("write request error = %v", err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(connection), nil)
+	if err != nil {
+		t.Fatalf("ReadResponse() error = %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusRequestHeaderFieldsTooLarge {
+		t.Errorf("status = %d, want %d", response.StatusCode, http.StatusRequestHeaderFieldsTooLarge)
+	}
+	if got := response.Header.Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want transport-generated text response", got)
 	}
 }
 
@@ -37,7 +73,7 @@ func TestListenReportsOccupiedPort(t *testing.T) {
 	defer occupied.Close()
 
 	port := occupied.Addr().(*net.TCPAddr).Port
-	server, err := Listen(context.Background(), netip.MustParseAddr("127.0.0.1"), uint16(port), io.Discard)
+	server, err := Listen(context.Background(), netip.MustParseAddr("127.0.0.1"), uint16(port), unavailableProvider{}, func(error) {}, io.Discard)
 	if err == nil {
 		_ = server.Close()
 		t.Fatal("Listen() error = nil, want occupied-port error")

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Adrien-hue/joy-pi-health/internal/config"
 	"github.com/Adrien-hue/joy-pi-health/internal/httpapi"
+	"github.com/Adrien-hue/joy-pi-health/internal/snapshot"
 )
 
 const shutdownTimeout = 2 * time.Second
@@ -20,7 +21,7 @@ type httpRuntime interface {
 
 type lifecycleDependencies struct {
 	signalContext func() (context.Context, context.CancelFunc)
-	startHTTP     func(context.Context, config.Config, io.Writer) (httpRuntime, error)
+	startHTTP     func(context.Context, config.Config, func(error), io.Writer) (httpRuntime, error)
 }
 
 // Run is the process-level application boundary.
@@ -50,7 +51,14 @@ func run(args []string, environment []string, stdout, stderr io.Writer, dependen
 		return 0
 	}
 
-	server, err := dependencies.startHTTP(ctx, resolved, stderr)
+	fatalResult := make(chan error, 1)
+	notifyFatal := func(fatalErr error) {
+		select {
+		case fatalResult <- fatalErr:
+		default:
+		}
+	}
+	server, err := dependencies.startHTTP(ctx, resolved, notifyFatal, stderr)
 	if err != nil {
 		if ctx.Err() != nil {
 			return 0
@@ -69,6 +77,10 @@ func run(args []string, environment []string, stdout, stderr io.Writer, dependen
 	select {
 	case <-ctx.Done():
 		return shutDown(server, serveResult, stderr)
+	case <-fatalResult:
+		writeOperationalError(stderr, "internal HTTP failure")
+		_ = shutDown(server, serveResult, stderr)
+		return 1
 	case serveErr := <-serveResult:
 		_ = server.Close()
 		if serveErr != nil {
@@ -80,8 +92,16 @@ func run(args []string, environment []string, stdout, stderr io.Writer, dependen
 	}
 }
 
-func startHTTP(ctx context.Context, resolved config.Config, errorOutput io.Writer) (httpRuntime, error) {
-	return httpapi.Listen(ctx, resolved.ListenAddress(), resolved.ListenPort(), errorOutput)
+func startHTTP(ctx context.Context, resolved config.Config, fatal func(error), errorOutput io.Writer) (httpRuntime, error) {
+	return httpapi.Listen(ctx, resolved.ListenAddress(), resolved.ListenPort(), pendingSnapshotProvider{}, fatal, errorOutput)
+}
+
+// pendingSnapshotProvider keeps the public transport honest until the real
+// collection coordinator is introduced.
+type pendingSnapshotProvider struct{}
+
+func (pendingSnapshotProvider) Snapshot(context.Context) (snapshot.Encoded, error) {
+	return snapshot.Encoded{}, snapshot.ErrNoUsefulSnapshot
 }
 
 func shutDown(server httpRuntime, serveResult <-chan error, stderr io.Writer) int {

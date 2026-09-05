@@ -6,7 +6,7 @@ The service will expose one current snapshot of CPU, load, memory, root-filesyst
 
 ## Project status
 
-The v0.1 requirements and architecture are frozen and approved. The configuration and foreground HTTP lifecycle foundations exist, but the public API and metric collection have not started. There is currently no functional monitoring service or release artifact.
+The v0.1 requirements and architecture are frozen and approved. The configuration, foreground lifecycle, and public HTTP/JSON contract foundations exist, but metric collection has not started. There is currently no functional monitoring service or release artifact.
 
 Canonical repository and Go module path:
 
@@ -34,14 +34,18 @@ Development requires Go 1.27.1. From the repository root, the supported foundati
 
 ```text
 go version
+go list -m
 go mod tidy -diff
 gofmt -l cmd internal
 go test ./...
 go vet ./...
 go build ./...
+go run ./cmd/joy-pi-health --help
+git diff --check
+git status --short
 ```
 
-`go version` must report Go 1.27.1, and the module-tidiness and formatting checks must produce no output. The executable currently supports configuration and lifecycle development only.
+`go version` must report Go 1.27.1, and the module-tidiness and formatting checks must produce no output. The executable currently supports configuration, lifecycle, and HTTP-contract development only.
 
 The implemented command-line configuration can be inspected with:
 
@@ -49,13 +53,19 @@ The implemented command-line configuration can be inspected with:
 go run ./cmd/joy-pi-health --help
 ```
 
-To run the pre-API listener in the foreground for lifecycle development:
+To run the listener in the foreground:
 
 ```text
 go run ./cmd/joy-pi-health
 ```
 
-Stop it with Ctrl+C. The listener currently returns a non-normative `404 Not Found` for every request, including `/v1/snapshot`; no public API or metric response is implemented yet. Production systemd readiness notification also remains intentionally disabled until every frozen readiness gate exists.
+The frozen operation is available at:
+
+```text
+curl.exe -i http://127.0.0.1:8080/v1/snapshot
+```
+
+Until real collection is introduced, a valid snapshot request returns the contract-compliant `503 temporarily_unavailable` error envelope rather than fabricated metrics. Stop the service with Ctrl+C. Production systemd readiness notification remains intentionally disabled until every frozen readiness gate exists.
 
 Compile the production code for the Raspberry Pi 3B architecture without executing it:
 

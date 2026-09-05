@@ -30,14 +30,18 @@ type Server struct {
 }
 
 // Listen binds a bounded IPv4 HTTP server to the configured endpoint.
-func Listen(ctx context.Context, address netip.Addr, port uint16, errorOutput io.Writer) (*Server, error) {
+func Listen(ctx context.Context, address netip.Addr, port uint16, provider SnapshotProvider, fatal func(error), errorOutput io.Writer) (*Server, error) {
+	handler, err := newRequestHandler(provider, fatal)
+	if err != nil {
+		return nil, err
+	}
 	endpoint := net.JoinHostPort(address.String(), strconv.FormatUint(uint64(port), 10))
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp4", endpoint)
 	if err != nil {
 		return nil, err
 	}
 
-	return newServer(listener, http.NotFoundHandler(), errorOutput), nil
+	return newServer(listener, handler, errorOutput), nil
 }
 
 func newServer(listener net.Listener, handler http.Handler, errorOutput io.Writer) *Server {

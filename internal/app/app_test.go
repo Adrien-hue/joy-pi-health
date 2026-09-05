@@ -50,7 +50,7 @@ func TestRunConfigurationOutcomesPrecedeRuntime(t *testing.T) {
 					runtimeCalled = true
 					return context.WithCancel(context.Background())
 				},
-				startHTTP: func(context.Context, config.Config, io.Writer) (httpRuntime, error) {
+				startHTTP: func(context.Context, config.Config, func(error), io.Writer) (httpRuntime, error) {
 					runtimeCalled = true
 					return nil, errors.New("must not be called")
 				},
@@ -81,7 +81,7 @@ func TestRunAlreadyCancelledDoesNotBind(t *testing.T) {
 		signalContext: func() (context.Context, context.CancelFunc) {
 			return ctx, func() {}
 		},
-		startHTTP: func(context.Context, config.Config, io.Writer) (httpRuntime, error) {
+		startHTTP: func(context.Context, config.Config, func(error), io.Writer) (httpRuntime, error) {
 			startCalled = true
 			return nil, errors.New("must not be called")
 		},
@@ -219,12 +219,43 @@ func TestRunRepeatedStartStopJoinsServeGoroutine(t *testing.T) {
 	}
 }
 
+func TestRunInternalHTTPFailureShutsDownAndExitsOne(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server := newFakeHTTPRuntime()
+	status := make(chan int, 1)
+	var stderr bytes.Buffer
+	fatalReady := make(chan func(error), 1)
+	dependencies := lifecycleDependencies{
+		signalContext: func() (context.Context, context.CancelFunc) { return ctx, func() {} },
+		startHTTP: func(_ context.Context, _ config.Config, fatal func(error), _ io.Writer) (httpRuntime, error) {
+			fatalReady <- fatal
+			return server, nil
+		},
+	}
+	go func() { status <- run(nil, nil, io.Discard, &stderr, dependencies) }()
+	waitForSignal(t, server.started, "HTTP serve start")
+	notifyFatal := waitForResult(t, fatalReady, "fatal notifier")
+	notifyFatal(errors.New("internal defect"))
+
+	if got := waitForResult(t, status, "fatal shutdown"); got != 1 {
+		t.Errorf("run() status = %d, want 1", got)
+	}
+	shutdownCalls, _ := server.calls()
+	if shutdownCalls != 1 {
+		t.Errorf("Shutdown() calls = %d, want 1", shutdownCalls)
+	}
+	assertDiagnostic(t, stderr.String(), true, "operational error")
+}
+
 func dependenciesFor(ctx context.Context, server httpRuntime, startErr error) lifecycleDependencies {
 	return lifecycleDependencies{
 		signalContext: func() (context.Context, context.CancelFunc) {
 			return ctx, func() {}
 		},
-		startHTTP: func(context.Context, config.Config, io.Writer) (httpRuntime, error) {
+		startHTTP: func(context.Context, config.Config, func(error), io.Writer) (httpRuntime, error) {
 			return server, startErr
 		},
 	}

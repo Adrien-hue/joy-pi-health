@@ -276,4 +276,11 @@ These values are part of the v0.1 operational HTTP contract. They may be reconsi
 - v0.1 adds no alternate endpoint or representation.
 - A breaking field, type, nullability, semantic, or error change requires appropriate API/schema versioning.
 
+## 10. Approved v0.1 transport errata
+
+These narrow corrections reconcile the contract with the approved standard-library HTTP/1.1 server and conventional HTTP semantics. They do not change the snapshot schema or application-level error mapping.
+
+- A request rejected by the Go HTTP parser for exceeding the header limit does not reach the application handler. Its transport-generated `431 Request Header Fields Too Large` response may therefore use the standard-library plain-text body and close the connection instead of using the JSON `invalid_request` envelope.
+- `HEAD /v1/snapshot` remains an unsupported method and returns `405 Method Not Allowed` with `Allow: GET`. In accordance with HTTP HEAD semantics, the response carries no JSON body even though its logical request-level classification is `invalid_request`.
+
 This document is frozen. Future releases receive a self-contained release-specific HTTP contract. Corrections here must be labelled as v0.1 errata and must not silently redefine shipped behavior.
