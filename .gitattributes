@@ -1,0 +1,23 @@
+# Repository text normalization
+* text=auto
+
+# Go source must remain LF on every platform.
+*.go text eol=lf
+
+# Shell scripts execute on Linux/Debian and must remain LF.
+*.sh text eol=lf
+
+# Repository configuration and documentation.
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+*.in text eol=lf
+*.rules text eol=lf
+
+# Windows-native scripts, if introduced later.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
