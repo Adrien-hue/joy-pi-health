@@ -110,6 +110,40 @@ GitHub Actions runs repository quality checks on Linux and Windows, performs Lin
 
 CI outputs are retained only as labelled validation artifacts. They are not official releases and do not establish Raspberry Pi compatibility. The exact validated bytes must still pass the real Pi 3B release gates described in the [release-validation and handoff procedure](docs/release-validation.md).
 
+## Raspberry Pi 3B release acceptance
+
+The operator-assisted Class C procedure and evidence rules are defined in the [release-validation runbook](docs/release-validation.md). The committed harness must be frozen before physical measurements begin. It does not download CI artifacts, rebuild the service, install packages, invoke `sudo`, change firmware-device permissions, or decide that a release passed.
+
+Run its read-only stages on the Pi with explicit artifact and evidence directories:
+
+```text
+sh test/release/pi3b/verify-readonly.sh verify-artifacts ARTIFACT_DIR EVIDENCE_DIR EXPECTED_COMMIT [video|acl]
+sh test/release/pi3b/verify-readonly.sh inspect-platform EVIDENCE_DIR
+sh test/release/pi3b/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
+sh test/release/pi3b/verify-readonly.sh managed EVIDENCE_DIR
+```
+
+The fixed performance procedures are:
+
+```text
+sh test/release/pi3b/measure-performance.sh cpu EVIDENCE_DIR http://127.0.0.1:8080/v1/snapshot --allow-load
+sh test/release/pi3b/measure-performance.sh rss EVIDENCE_DIR
+sh test/release/pi3b/measure-performance.sh idle-cpu EVIDENCE_DIR
+sh test/release/pi3b/measure-performance.sh readiness EVIDENCE_DIR
+sh test/release/pi3b/measure-performance.sh latency EVIDENCE_DIR
+sh test/release/pi3b/measure-performance.sh soak EVIDENCE_DIR
+```
+
+The CPU command starts a bounded `stress-ng` workload only with the explicit `--allow-load` acknowledgement. The readiness command requires an operator already authorized to start and stop the managed service. Package installation, systemd test overrides, firmware confinement probes, lifecycle operations, and final evidence review remain explicit operator steps.
+
+When no older official package exists, create only the labelled, non-release lifecycle fixture described by the runbook:
+
+```text
+sh test/release/pi3b/derive-lifecycle-fixture.sh CANDIDATE_DEB TEMPORARY_OUTPUT_DIRECTORY
+```
+
+Do not claim Pi 3B acceptance until every release-blocking Class A, Class B, and Class C gate has genuine reviewed evidence.
+
 ## License
 
 Joy Pi Health is licensed under the [MIT License](LICENSE).
