@@ -89,7 +89,11 @@ func TestMaintainerScriptsUsePolicyAwareHelpers(t *testing.T) {
 			t.Errorf("%s contains direct systemctl service control", script)
 		}
 	}
-	if !strings.Contains(postinst, `if [ -z "${2:-}" ]`) || !strings.Contains(postinst, "else\n        deb-systemd-invoke try-restart") {
+	freshInstallBranch := regexp.MustCompile(
+		`(?s)if\s+\[\s+-z\s+"\$\{2:-\}"\s+\]\s*;\s*then.*?deb-systemd-helper\s+enable\s+"\$unit".*?deb-systemd-invoke\s+start\s+"\$unit".*?else.*?deb-systemd-invoke\s+try-restart\s+"\$unit".*?fi`,
+	)
+
+	if !freshInstallBranch.MatchString(postinst) {
 		t.Error("postinst does not distinguish fresh installation from upgrade/reinstall/downgrade")
 	}
 	if !strings.Contains(prerm, `if [ "${1:-}" = remove ]`) {
