@@ -59,6 +59,8 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
+      - name: Trust GitHub workspace
+        run: git config --system --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install Go 1.27.1
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
