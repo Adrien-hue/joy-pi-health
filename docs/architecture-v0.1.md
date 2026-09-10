@@ -6,14 +6,18 @@
 
 Product scope and acceptance are defined by the [v0.1 requirements](requirements-v0.1.md). Consumer-visible behavior is defined by the [v0.1 HTTP API](http-api-v0.1.md). Architecture is subordinate to those contracts. Genuine conflicts require explicit baseline correction.
 
+### Approved v0.1 reference-hardware architecture erratum — 2026-09-10
+
+Architecture references that assign profiling, resource measurement, firmware-permission validation, or exact-release acceptance to Raspberry Pi 3B are superseded by the approved reference-hardware correction: Raspberry Pi 3B+ is the sole v0.1 release-gating device. The known maintained board is Raspberry Pi 3 Model B Plus Rev 1.3, revision `a020d3`. The ARMv8.0/AArch64 build baseline, runtime architecture, permission mechanisms, and all existing thresholds remain unchanged. Raspberry Pi 3B, Pi 4B, and Pi 5 remain non-blocking compatibility targets.
+
 ## 1. Language and runtime
 
 - Implement the service in Go.
 - Produce one native Linux/ARM64 executable.
-- Target the ARMv8.0/AArch64 baseline supported by Pi 3B.
+- Target the ARMv8.0/AArch64 baseline supported by the Pi 3B+ reference device.
 - Use a pure-Go runtime graph with cgo disabled and no external language runtime.
 - Pin the exact Go patch release for reproducible release builds.
-- Preserve enough symbols for useful fatal diagnostics unless Pi 3B measurements justify a change.
+- Preserve enough symbols for useful fatal diagnostics unless Pi 3B+ measurements justify a change.
 
 Go provides a small deployable artifact, direct Linux integration, efficient blocking I/O, standard HTTP/JSON support, and simple bounded concurrency without a framework.
 
@@ -111,7 +115,7 @@ The exact Go clock, ticker, and synchronization types are implementation details
 - The first admitted request starts a cycle; overlapping requests join it.
 - Request cancellation detaches that requester but does not cancel the shared cycle.
 - An orphaned cycle continues within its 500 ms bound; shutdown may cancel it.
-- Collectors remain sequential unless Pi 3B profiling proves a baseline revision necessary.
+- Collectors remain sequential unless Pi 3B+ profiling proves a baseline revision necessary.
 - Each domain has at most 100 ms and cannot exceed the remaining cycle time.
 - When the cycle budget is exhausted, skip later collectors and mark their fields unavailable.
 - Discard any result that completes after its domain deadline.
@@ -229,7 +233,7 @@ The configuration surface is exactly:
 - Retain the identity after removal to avoid unsafe ID reuse.
 - Preferred mailbox access: supplementary `video` credential through the unit plus closed systemd device policy allowing only `/dev/vcio`, `/dev/vcio_gencmd` when present, and standard pseudo-devices.
 - Grant no capabilities, root, unrestricted devices, setuid code, or global ownership replacement.
-- Validate actual DAC/group/device behavior on the release-gating Pi 3B Trixie system.
+- Validate actual DAC/group/device behavior on the release-gating Pi 3B+ Trixie system.
 - If the preferred combination cannot provide narrow ioctl access, use a service-specific ACL that survives device recreation without disrupting OS permissions.
 - Failure of both unprivileged mechanisms blocks release.
 
@@ -279,7 +283,7 @@ Test layers:
 3. HTTP/JSON contract and exact-number fixtures;
 4. Linux/Raspberry Pi platform adapter tests;
 5. Debian/systemd installation and lifecycle tests;
-6. exact-release-candidate tests on the real Pi 3B.
+6. exact-release-candidate tests on the real Pi 3B+.
 
 Use package-local tests and `testdata`; reserve top-level `test/` for black-box, package, systemd, Pi, and release work. Prefer the standard library and deterministic lifecycle-completion assertions. Race and goroutine-profile/count checks are additional diagnostics.
 
@@ -288,7 +292,7 @@ Use package-local tests and `testdata`; reserve top-level `test/` for black-box,
 Frozen release gates:
 
 - RSS no more than 25 MiB.
-- Idle CPU no more than 0.5% of one Pi 3B core.
+- Idle CPU no more than 0.5% of one Pi 3B+ core.
 - Readiness no more than one second.
 - Snapshot p95 no more than 100 ms.
 
@@ -311,7 +315,7 @@ Architecture rules:
 - Do not log successful requests by default or add asynchronous logging.
 - Profile the exact production package externally and through test/benchmark harnesses; expose no profiling endpoint or production flag.
 
-Do not introduce object pools, `sync.Pool`, custom allocators, arenas, unsafe conversions, GC tuning, hand-written JSON, collector parallelism, or specialized parsing until measured Pi 3B evidence proves it necessary and an approved revision permits it.
+Do not introduce object pools, `sync.Pool`, custom allocators, arenas, unsafe conversions, GC tuning, hand-written JSON, collector parallelism, or specialized parsing until measured Pi 3B+ evidence proves it necessary and an approved revision permits it.
 
 ## 15. Repository and module boundaries
 
@@ -384,12 +388,12 @@ The architecture decisions are mutually consistent, including these deliberate r
 - `Type=notify` is lightweight and does not wait for a CPU utilization publication.
 - Administrator systemd drop-ins configure the environment without adding an application configuration file.
 - Encoded-buffer memory is only one part of the complete RSS budget.
-- Sequential collection remains authoritative until real Pi 3B evidence justifies review.
+- Sequential collection remains authoritative until real Pi 3B+ evidence justifies review.
 
 The following are required validations with predetermined responses, not open architecture choices:
 
 - Prove the worst-case schema encoding fits 64 KiB.
-- Validate Pi 3B mailbox DAC and systemd device policy, using the approved ACL fallback if necessary.
+- Validate Pi 3B+ mailbox DAC and systemd device policy, using the approved ACL fallback if necessary.
 - Measure gates and engineering targets using the exact package.
 - Pin the concrete Go patch version.
 - Choose implementation primitives within the frozen behavior.

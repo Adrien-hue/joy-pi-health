@@ -7,10 +7,11 @@ base_url=http://127.0.0.1:8080
 usage() {
     cat >&2 <<'EOF'
 usage:
-  test/release/pi3b/verify-readonly.sh verify-artifacts ARTIFACT_DIR EVIDENCE_DIR EXPECTED_COMMIT [video|acl]
-  test/release/pi3b/verify-readonly.sh inspect-platform EVIDENCE_DIR
-  test/release/pi3b/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
-  test/release/pi3b/verify-readonly.sh managed EVIDENCE_DIR
+  test/release/pi3bplus/verify-readonly.sh verify-artifacts ARTIFACT_DIR EVIDENCE_DIR EXPECTED_COMMIT [video|acl]
+  test/release/pi3bplus/verify-readonly.sh inspect-platform EVIDENCE_DIR
+  test/release/pi3bplus/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
+  test/release/pi3bplus/verify-readonly.sh managed EVIDENCE_DIR
+  test/release/pi3bplus/verify-readonly.sh validate-model MODEL_FILE
 
 The script never installs packages, changes permissions, edits service
 configuration, or invokes sudo. It writes only below EVIDENCE_DIR and temporary
@@ -43,6 +44,37 @@ record_command() {
         printf '\n'
         "$@"
     } 2>&1
+}
+
+release_gating_model='Raspberry Pi 3 Model B Plus'
+
+validate_model_file() {
+    [ "$#" -eq 1 ] || return 2
+    model_file=$1
+    [ -r "$model_file" ] || return 1
+
+    byte_count=$(wc -c <"$model_file")
+    model_with_sentinel=$(tr -d '\000' <"$model_file"; printf '\001')
+    model=${model_with_sentinel%?}
+    text_byte_count=$(printf '%s' "$model" | wc -c)
+    nul_count=$((byte_count - text_byte_count))
+    case "$nul_count" in
+        0) ;;
+        1)
+            last_byte=$(tail -c 1 "$model_file" | od -An -tu1 | tr -d '[:space:]')
+            [ "$last_byte" = 0 ] || return 1
+            ;;
+        *) return 1 ;;
+    esac
+
+    case "$model" in
+        "$release_gating_model") return 0 ;;
+        "$release_gating_model Rev "*)
+            revision=${model#"$release_gating_model Rev "}
+            printf '%s\n' "$revision" | grep -Eq '^[0-9]+([.][0-9]+)*$'
+            ;;
+        *) return 1 ;;
+    esac
 }
 
 verify_artifacts() {
@@ -148,7 +180,7 @@ verify_artifacts() {
 inspect_platform() {
     [ "$#" -eq 1 ] || usage
     prepare_evidence "$1"
-    for command_name in awk basename dpkg find findmnt getent grep nproc sed stat systemctl tr uname; do
+    for command_name in awk basename dpkg find findmnt getent grep nproc od sed stat systemctl tail tr uname wc; do
         require_command "$command_name"
     done
 
@@ -219,8 +251,8 @@ inspect_platform() {
 
     [ "$(uname -m)" = aarch64 ]
     grep -Eq '^VERSION_CODENAME=(trixie|"trixie")$' /etc/os-release
-    if [ ! -r /proc/device-tree/model ] || ! tr -d '\000' </proc/device-tree/model | grep -F 'Raspberry Pi 3 Model B' >/dev/null; then
-        echo "joy-pi-health: platform is not a Raspberry Pi 3 Model B" >&2
+    if [ ! -r /proc/device-tree/model ] || ! validate_model_file /proc/device-tree/model; then
+        echo "joy-pi-health: platform is not a Raspberry Pi 3 Model B Plus" >&2
         exit 1
     fi
     echo "platform inspection completed"
@@ -409,5 +441,6 @@ case "$mode" in
     inspect-platform) inspect_platform "$@" ;;
     rootless) rootless "$@" ;;
     managed) managed "$@" ;;
+    validate-model) validate_model_file "$@" ;;
     *) usage ;;
 esac

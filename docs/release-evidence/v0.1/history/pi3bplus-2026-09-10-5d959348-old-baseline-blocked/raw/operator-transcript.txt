@@ -1,0 +1,104 @@
+CI run URL: https://github.com/Adrien-hue/joy-pi-health/actions/runs/34051895987
+Run ID: 34051895987
+Attempt: 1
+Artifact: joy-pi-health-ci-validation-5d9593486bd057619f7e214007d988308cf5cbae-34051895987-1
+Candidate commit: 5d9593486bd057619f7e214007d988308cf5cbae
+Harness commit: be7a0d824f62b94c842d8e5326110b1852c5a0bc
+
+===== Pi artifact verification
+joy-pi-health_0.1.0-1_arm64.deb: OK
+joy-pi-health-v0.1.0-linux-arm64.tar.gz: OK
+joy-pi-health-v0.1.0-release.json: OK
+artifact identity verification completed
+
+===== Harness hashes transferred to Pi
+fe5bad8e6a44185f44c40413fa282166c30b26025a6682f44c6a702d7180e776  harness/test/release/pi3b/verify-readonly.sh
+e550b050503416c237f6614d2834d1e080e9fe1965c8274db91ab687d21344fd  harness/test/release/pi3b/measure-performance.sh
+2eca9403ddd22f7d6ae44614bb5438368bef7bd14e65d10d8ef90a4a0219a252  harness/test/release/pi3b/derive-lifecycle-fixture.sh
+
+===== Artifact hashes on Pi
+899513a9a58224430a4bf75b1cea2cbd9fb53a070b98fe76e40c5e05a21820b6  SHA256SUMS
+35476e6dae4e6900d61cd273c0097187cde516b4c0c19c405e9d618dd484b665  joy-pi-health_0.1.0-1_arm64.deb
+821cfd04a0b411a172a9cc402fe2b9bcfaa2d3be0361b5fd29efb4bb15bafd72  joy-pi-health-v0.1.0-linux-arm64.tar.gz
+4d086f1d6e711b644f93dfb9e6ff27fd37a935d41a0c41fc4c2564e365f8d38e  joy-pi-health-v0.1.0-release.json
+
+===== Package identity
+joy-pi-health
+0.1.0-1
+arm64
+
+===== kernel
+Linux joy-pi-home 6.18.34+rpt-rpi-v8 #1 SMP PREEMPT Debian 1:6.18.34-1+rpt1 (2026-06-09) aarch64 GNU/Linux
+
+===== architecture
+aarch64
+
+===== debian-architecture
+arm64
+
+===== os-release
+PRETTY_NAME="Debian GNU/Linux 13 (trixie)"
+VERSION_ID="13"
+VERSION="13 (trixie)"
+VERSION_CODENAME=trixie
+DEBIAN_VERSION_FULL=13.6
+ID=debian
+
+===== Raspberry Pi model
+Raspberry Pi 3 Model B Plus Rev 1.3
+
+===== CPU identity without serial
+Revision        : a020d3
+Model           : Raspberry Pi 3 Model B Plus Rev 1.3
+
+===== logical-cpus
+4
+
+===== online-topology
+0-3
+
+===== memory
+MemTotal:         926828 kB
+
+===== root-filesystem
+/dev/mmcblk0p2 ext4   14G 11.1G rw,noatime
+
+===== systemd-version
+systemd 257 (257.13-1~deb13u1)
+
+===== dpkg-version
+Debian dpkg package management program version 1.22.22 (arm64).
+
+===== video-group
+video:x:44:joyteaser
+
+===== firmware devices
+/dev/vcio type=character special file owner=root group=root mode=600 major_minor=a:101
+/dev/vcio_gencmd type=character special file owner=root group=video mode=660 major_minor=a:104
+
+===== thermal zones
+thermal_zone0 type=cpu-thermal temperature_millidegrees=52616
+
+===== existing package
+dpkg-query: no packages found matching joy-pi-health
+
+===== policy-rc.d
+absent
+
+===== reference firmware tool
+/usr/bin/vcgencmd
+May 21 2026 11:21:57
+version 288930ab4712b99596f32732664aaaeb881ef1e0 (clean) (release) (start)
+
+===== acceptance tool versions
+curl: curl 8.14.1 (aarch64-unknown-linux-gnu)
+jq: jq-1.7
+stress-ng: absent
+pidstat: absent
+mpstat: absent
+file: file-5.46
+readelf: GNU readelf (GNU Binutils for Debian) 2.44
+ss: ss utility, iproute2-6.15.0
+
+Final result under the baseline in force: BLOCKED at reference-platform validation.
+No later Class C gate was run.

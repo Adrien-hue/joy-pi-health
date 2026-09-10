@@ -41,6 +41,8 @@ func TestQualityWorkflowContract(t *testing.T) {
 		"pull_request:", "develop", "main", "workflow_dispatch:", "go mod tidy -diff", "gofmt -l cmd internal",
 		"go test ./...", "go vet ./...", "go build ./...", "go run ./cmd/joy-pi-health --help",
 		"CGO_ENABLED", "GOOS: linux", "GOARCH: arm64", "GOARM64: v8.0", "./test/packaging", "./test/ci",
+		"bash -n test/release/validate-artifacts.sh test/release/pi3bplus/*.sh",
+		"sh test/release/pi3bplus/model-validation-test.sh",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("quality workflow is missing %q", required)
@@ -56,6 +58,8 @@ func TestReleaseWorkflowContract(t *testing.T) {
 		"dpkg-dev", "lintian", "systemd", "retention-days: 14", "joy-pi-health-ci-validation-",
 		"joy-pi-health_0.1.0-1_arm64.deb", "joy-pi-health-v0.1.0-linux-arm64.tar.gz",
 		"joy-pi-health-v0.1.0-release.json", "SHA256SUMS",
+		"dash -n debian/build-release.sh debian/postinst debian/prerm debian/postrm test/release/validate-artifacts.sh test/release/pi3bplus/*.sh",
+		"sh test/release/pi3bplus/model-validation-test.sh",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("release workflow is missing %q", required)

@@ -56,6 +56,10 @@ jobs:
           test -z "$files" || { printf '%s\n' "$files"; exit 1; }
       - name: Run tests
         run: go test ./...
+      - name: Verify Raspberry Pi 3B+ release harness
+        run: |
+          bash -n test/release/validate-artifacts.sh test/release/pi3bplus/*.sh
+          sh test/release/pi3bplus/model-validation-test.sh
       - name: Run vet
         run: go vet ./...
       - name: Build
@@ -96,4 +100,3 @@ jobs:
           go build ./...
           go test -c -o "$RUNNER_TEMP/packaging.test" ./test/packaging
           go test -c -o "$RUNNER_TEMP/ci.test" ./test/ci
-

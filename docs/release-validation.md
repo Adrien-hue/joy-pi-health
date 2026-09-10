@@ -1,4 +1,4 @@
-# Release validation and Raspberry Pi 3B handoff
+# Release validation and Raspberry Pi 3B+ handoff
 
 This operational runbook defines Class C acceptance for Joy Pi Health v0.1. It does not replace the frozen [requirements](requirements-v0.1.md), [HTTP contract](http-api-v0.1.md), or [architecture](architecture-v0.1.md). When they overlap, those documents remain normative.
 
@@ -8,9 +8,13 @@ The acceptance harness is frozen and reviewed before a physical run. A run must 
 
 - **Class A — developer:** deterministic unit, integration, contract, static-policy, native-build, and Linux/ARM64 compile-only checks.
 - **Class B — CI Debian:** deterministic artifact construction and inspection in Debian Trixie, lintian, systemd verification, checksums, and reproducibility.
-- **Class C — real Pi 3B:** the exact Class B bytes tested on a real Pi 3B running Raspberry Pi OS Lite 64-bit Debian 13 Trixie.
+- **Class C — real Pi 3B+:** the exact Class B bytes tested on a real Pi 3B+ running Raspberry Pi OS Lite 64-bit Debian 13 Trixie.
 
-All three classes are required. CI success cannot establish Pi 3B acceptance.
+All three classes are required. CI success cannot establish Pi 3B+ acceptance.
+
+The v0.1 reference-hardware erratum corrects a mistaken Raspberry Pi 3B designation. The sole Class C gate is now Raspberry Pi 3B+. The known reference board reports `Raspberry Pi 3 Model B Plus Rev 1.3` and revision `a020d3`; the canonical model name is `Raspberry Pi 3 Model B Plus`. The stopped 2026-09-10 attempt under the former baseline remains historically `BLOCKED` and is never reinterpreted as a pass.
+
+The requirements, architecture, and README are included in the release artifacts. Consequently, the pre-correction Class B bytes cannot be reused: after this correction is committed, Class A and Class B must run again and a new exact artifact bundle must begin the restarted Class C procedure. The release version and artifact format remain unchanged.
 
 ## Fixed Class C inputs
 
@@ -34,17 +38,17 @@ Before the first command, create `commands.log`. Record each command with a UTC 
 The scripts require an explicit evidence directory and never report a release decision. They retain observations from which the operator assigns gate status.
 
 ```text
-sh test/release/pi3b/verify-readonly.sh verify-artifacts ARTIFACT_DIR EVIDENCE_DIR EXPECTED_COMMIT [video|acl]
-sh test/release/pi3b/verify-readonly.sh inspect-platform EVIDENCE_DIR
-sh test/release/pi3b/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
-sh test/release/pi3b/verify-readonly.sh managed EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh cpu EVIDENCE_DIR http://127.0.0.1:8080/v1/snapshot --allow-load
-sh test/release/pi3b/measure-performance.sh rss EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh idle-cpu EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh readiness EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh latency EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh soak EVIDENCE_DIR
-sh test/release/pi3b/derive-lifecycle-fixture.sh CANDIDATE_DEB TEMPORARY_OUTPUT_DIRECTORY
+sh test/release/pi3bplus/verify-readonly.sh verify-artifacts ARTIFACT_DIR EVIDENCE_DIR EXPECTED_COMMIT [video|acl]
+sh test/release/pi3bplus/verify-readonly.sh inspect-platform EVIDENCE_DIR
+sh test/release/pi3bplus/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
+sh test/release/pi3bplus/verify-readonly.sh managed EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh cpu EVIDENCE_DIR http://127.0.0.1:8080/v1/snapshot --allow-load
+sh test/release/pi3bplus/measure-performance.sh rss EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh idle-cpu EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh readiness EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh latency EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh soak EVIDENCE_DIR
+sh test/release/pi3bplus/derive-lifecycle-fixture.sh CANDIDATE_DEB TEMPORARY_OUTPUT_DIRECTORY
 ```
 
 The CPU command deliberately requires `--allow-load`. The readiness command must be run by an operator already authorized to start and stop the service. The scripts never invoke `sudo`, install software, alter device permissions, or edit systemd configuration.
@@ -70,12 +74,13 @@ Use a fresh reference image with no prior Joy Pi Health package. Installing acce
 Run:
 
 ```text
-sh test/release/pi3b/verify-readonly.sh inspect-platform EVIDENCE_DIR
+sh test/release/pi3bplus/verify-readonly.sh inspect-platform EVIDENCE_DIR
 ```
 
 Review and record:
 
-- `aarch64`, Debian `trixie`, and Raspberry Pi 3 Model B identity;
+- `aarch64`, Debian `trixie`, and exact Raspberry Pi 3 Model B Plus identity;
+- the raw model string and revision code, without serial number or machine ID;
 - OS release, kernel, CPU revision and online topology, excluding the unique serial number;
 - memory and root storage;
 - systemd and dpkg versions;
@@ -86,14 +91,16 @@ Review and record:
 - whether `policy-rc.d` is present;
 - absence of an installed Joy Pi Health package.
 
-Do not change device DAC, ACLs, ownership, groups, or service configuration before the managed permission test. If the image is not a fresh Pi 3B Trixie environment, mark the affected gates `BLOCKED` and stop.
+Do not change device DAC, ACLs, ownership, groups, or service configuration before the managed permission test. If the image is not a fresh Pi 3B+ Trixie environment, mark the affected gates `BLOCKED` and stop.
+
+For model validation, remove device-tree NUL terminators, normalize only a canonical numeric ` Rev <number>` suffix, and require the remaining name to equal `Raspberry Pi 3 Model B Plus` exactly. Similar prefixes, Raspberry Pi 3 Model B, Pi 4, Pi 5, arbitrary suffixes, whitespace changes, and malformed values do not satisfy the gate.
 
 ## 3. Rootless portable-artifact acceptance
 
 As an ordinary non-root user, run:
 
 ```text
-sh test/release/pi3b/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
+sh test/release/pi3bplus/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
 ```
 
 The harness checks archive path safety, ARM64 execution, `--help`, default loopback startup, immediate and warmed snapshots, trailing CPU availability, clean shutdown, unused stdout, and absence of files in the process working directory.
@@ -127,7 +134,7 @@ Do not invoke maintainer scripts directly. Their helper policy is Class A/B evid
 With the exact packaged unit active, run:
 
 ```text
-sh test/release/pi3b/verify-readonly.sh managed EVIDENCE_DIR
+sh test/release/pi3bplus/verify-readonly.sh managed EVIDENCE_DIR
 ```
 
 Confirm the process uses `_joy-pi-health`, has zero effective capabilities, listens only on `127.0.0.1:8080`, uses `Type=notify`, and exposes no health, readiness, metrics, or administrative route.
@@ -137,7 +144,7 @@ The harness captures the frozen route/method/query/body behavior and the current
 Run the readiness measurement after returning the unit to its packaged configuration:
 
 ```text
-sh test/release/pi3b/measure-performance.sh readiness EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh readiness EVIDENCE_DIR
 ```
 
 Every one of 20 clean starts must reach systemd readiness in no more than one second. Record the 500 ms engineering target separately. An immediate response may still have unavailable CPU utilization because readiness does not wait for a second CPU sample.
@@ -179,7 +186,7 @@ Bracket service requests closely with independent observations and retain every 
 Run the fixed CPU procedure only after workload approval:
 
 ```text
-sh test/release/pi3b/measure-performance.sh cpu EVIDENCE_DIR http://127.0.0.1:8080/v1/snapshot --allow-load
+sh test/release/pi3bplus/measure-performance.sh cpu EVIDENCE_DIR http://127.0.0.1:8080/v1/snapshot --allow-load
 ```
 
 Counter resets, reboots, topology mutation, malformed data, impossible values, and internal defects use same-commit deterministic Class A evidence. Do not alter the Pi to manufacture them.
@@ -219,7 +226,7 @@ Use `NRestarts` and monotonic journal timestamps to record the initial one-secon
 Create the non-release fixture in a temporary directory:
 
 ```text
-sh test/release/pi3b/derive-lifecycle-fixture.sh joy-pi-health_0.1.0-1_arm64.deb TEMPORARY_OUTPUT_DIRECTORY
+sh test/release/pi3bplus/derive-lifecycle-fixture.sh joy-pi-health_0.1.0-1_arm64.deb TEMPORARY_OUTPUT_DIRECTORY
 ```
 
 Record its provenance and hash. It exists only because no older official package exists and must never be described as a release candidate.
@@ -246,10 +253,10 @@ Restore the exact `0.1.0-1` package, final packaged unit, default loopback setti
 Run:
 
 ```text
-sh test/release/pi3b/measure-performance.sh rss EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh idle-cpu EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh latency EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh soak EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh rss EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh idle-cpu EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh latency EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh soak EVIDENCE_DIR
 ```
 
 Fixed conditions and gates:
@@ -270,10 +277,10 @@ Under the restored final unit, use successful service observations plus read-onl
 
 ## 13. Evidence and release decision
 
-Copy the [evidence template](release-evidence/v0.1/pi3b-template.md) into:
+Copy the [evidence template](release-evidence/v0.1/pi3bplus-template.md) into:
 
 ```text
-docs/release-evidence/v0.1/pi3b-<UTC-date>-<candidate-short-SHA>/result.md
+docs/release-evidence/v0.1/pi3bplus-<UTC-date>-<candidate-short-SHA>/result.md
 ```
 
 Store reviewed text, JSON, and TSV evidence under its `raw/` directory. Do not commit candidate artifacts, unique serials, machine IDs, secrets, private keys, or unfiltered system logs. Produce `EVIDENCE_SHA256SUMS` after review.
@@ -285,7 +292,7 @@ Statuses mean:
 - `NOT RUN`: not attempted;
 - `BLOCKED`: a prerequisite, environment, or harness defect prevented a valid result.
 
-Every release-blocking Class A, B, and C gate must pass. Any release-blocking `FAIL`, `NOT RUN`, or `BLOCKED` prevents acceptance. Pi 3B+, 4B, and 5 remain non-blocking and evidence-limited.
+Every release-blocking Class A, B, and C gate must pass. Any release-blocking `FAIL`, `NOT RUN`, or `BLOCKED` prevents acceptance. Pi 3B, Pi 4B, and Pi 5 remain non-blocking and evidence-limited.
 
 ## 14. Harness defect rule
 
@@ -403,13 +410,13 @@ The acceptance-created administrator drop-in must be a uniquely named file benea
 The harness/runbook is reviewed and committed before physical testing, separately from evidence. A suitable harness commit is:
 
 ```text
-test: add Raspberry Pi 3B release acceptance harness
+test: add Raspberry Pi 3B+ release acceptance harness
 ```
 
 During physical measurement, do not commit. After the completed run, a separate evidence-only change may add genuine reviewed results. A suitable later commit is:
 
 ```text
-test: record Raspberry Pi 3B v0.1 release acceptance
+test: record Raspberry Pi 3B+ v0.1 release acceptance
 ```
 
 No product, runtime, packaging, CI, or permission correction belongs in the evidence commit.

@@ -6,6 +6,10 @@
 
 The exact public protocol is defined by the [v0.1 HTTP API](http-api-v0.1.md). The implementation design is defined by the [v0.1 architecture](architecture-v0.1.md). If these normative documents genuinely conflict, the conflict must be resolved explicitly rather than interpreted silently.
 
+### Approved v0.1 reference-hardware erratum — 2026-09-10
+
+The original v0.1 baseline designated Raspberry Pi 3 Model B as the release-gating reference because the physical reference board was mistakenly identified. The maintained physical reference is Raspberry Pi 3 Model B Plus Rev 1.3, revision `a020d3`. Effective with this approved correction, the canonical v0.1 release-gating model is `Raspberry Pi 3 Model B Plus`, and the complete Class C suite must run on a real Raspberry Pi 3B+ using the supported Raspberry Pi OS Lite 64-bit Debian 13 Trixie image. Raspberry Pi 3B, Pi 4B, and Pi 5 remain intended, non-blocking compatibility targets whose claims may not exceed their recorded evidence. All existing functional, operational, packaging, performance, and resource thresholds remain unchanged. Results recorded under the former designation retain their historical status and must not be reinterpreted retroactively.
+
 ## 1. Purpose and boundary
 
 Joy Pi Health is a lightweight system-monitoring microservice that runs on a Raspberry Pi and exposes information about the Raspberry Pi host itself.
@@ -47,7 +51,7 @@ v0.1 provides a single synchronous, read-only operation that returns a current c
 
 The service must be:
 
-- lightweight enough for a Raspberry Pi 3B;
+- lightweight enough for the Raspberry Pi 3B+ reference device;
 - low overhead at idle and during snapshot requests;
 - clean and maintainable;
 - straightforward to test without requiring a Pi for every development iteration;
@@ -67,10 +71,10 @@ The v0.1 target is 64-bit Raspberry Pi OS Lite based on Debian 13 (Trixie).
 
 ### 3.2 Hardware claims
 
-- Raspberry Pi 3B is the required reference device and the sole release-gating hardware model for v0.1.
-- The full functional, metric-conformance, operational, packaging, and performance suite must pass on a real Pi 3B.
-- Pi 3B+, Pi 4B, and Pi 5 are intended members of the supported hardware family.
-- Real-device validation on Pi 3B+, 4B, and 5 is non-blocking for the initial release.
+- Raspberry Pi 3B+ is the required reference device and the sole release-gating hardware model for v0.1.
+- The full functional, metric-conformance, operational, packaging, and performance suite must pass on a real Pi 3B+.
+- Pi 3B, Pi 4B, and Pi 5 are intended members of the supported hardware family.
+- Real-device validation on Pi 3B, Pi 4B, and Pi 5 is non-blocking for the initial release.
 - Results for those devices must be recorded when available.
 - No model may receive a compatibility claim stronger than the evidence recorded for it.
 - A later release may promote additional models to release-gating status once they are part of the regular test environment.
@@ -275,14 +279,14 @@ Requirements:
 
 ### 9.3 Platform and hardware acceptance
 
-- The exact release candidate must pass the complete suite on a real Pi 3B running the supported Trixie image.
+- The exact release candidate must pass the complete suite on a real Pi 3B+ running the supported Trixie image.
 - The final hardened systemd unit and firmware-device permissions are part of that test, not a relaxed test configuration.
 - Verify actual `/dev/vcio` and `/dev/vcio_gencmd` presence, ownership, DAC permissions, ioctl access, and device confinement.
 - Use the approved service-specific ACL fallback if supplementary `video` access plus systemd device policy cannot provide narrow access.
 - Failure of both unprivileged permission mechanisms blocks release.
-- Pi 3B+, 4B, and 5 results are non-blocking and evidence-limited for v0.1.
+- Pi 3B, Pi 4B, and Pi 5 results are non-blocking and evidence-limited for v0.1.
 
-### 9.4 Performance gates on Pi 3B
+### 9.4 Performance gates on Pi 3B+
 
 Under the frozen reproducible measurement conditions:
 
@@ -310,11 +314,11 @@ Architecture engineering targets provide additional headroom but do not replace 
 Release-blocking:
 
 - Deterministic unit, integration, contract, Linux platform, and package checks.
-- Full real Pi 3B functional, metric, operational, packaging, and performance acceptance.
+- Full real Pi 3B+ functional, metric, operational, packaging, and performance acceptance.
 
 Non-blocking but recorded:
 
-- Pi 3B+, Pi 4B, and Pi 5 real-device results.
+- Pi 3B, Pi 4B, and Pi 5 real-device results.
 - Additional diagnostic profiles and benchmarks that do not define a frozen gate.
 
 ## 10. Change control

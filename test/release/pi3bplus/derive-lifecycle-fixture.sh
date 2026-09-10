@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-    echo "usage: test/release/pi3b/derive-lifecycle-fixture.sh CANDIDATE_DEB OUTPUT_DIRECTORY" >&2
+    echo "usage: test/release/pi3bplus/derive-lifecycle-fixture.sh CANDIDATE_DEB OUTPUT_DIRECTORY" >&2
     exit 2
 }
 

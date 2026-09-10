@@ -1,10 +1,10 @@
-# Joy Pi Health v0.1 — Raspberry Pi 3B Class C evidence
+# Joy Pi Health v0.1 — Raspberry Pi 3B+ Class C evidence
 
-**Record status:** TEMPLATE — no acceptance result  
-**Normative gates:** [v0.1 requirements](../../requirements-v0.1.md)  
+**Record status:** TEMPLATE — no acceptance result
+**Normative gates:** [v0.1 requirements](../../requirements-v0.1.md)
 **Procedure:** [release-validation runbook](../../release-validation.md)
 
-Copy this template to `pi3b-<UTC-date>-<candidate-short-SHA>/result.md` only for a real completed or stopped Class C run. Never infer a pass or remove an unperformed gate.
+Copy this template to `pi3bplus-<UTC-date>-<candidate-short-SHA>/result.md` only for a real completed or stopped Class C run. Never infer a pass or remove an unperformed gate.
 
 ## Run identity
 
@@ -35,7 +35,9 @@ Copy this template to `pi3b-<UTC-date>-<candidate-short-SHA>/result.md` only for
 
 | Field | Recorded value |
 |---|---|
-| Raspberry Pi model | NOT RECORDED |
+| Raspberry Pi model, raw | NOT RECORDED |
+| Canonical release-gating model | Raspberry Pi 3 Model B Plus |
+| Known maintained board | Raspberry Pi 3 Model B Plus Rev 1.3; revision `a020d3` |
 | Board revision, excluding serial | NOT RECORDED |
 | Architecture | NOT RECORDED |
 | Raspberry Pi OS release/image | NOT RECORDED |
@@ -64,7 +66,7 @@ Use only `PASS`, `FAIL`, `NOT RUN`, or `BLOCKED`. Add the exact raw-evidence pat
 | Exact-candidate Class B workflow | NOT RUN | — | |
 | Workstation artifact identity | NOT RUN | — | |
 | Pi artifact identity | NOT RUN | — | |
-| Pi 3B / Trixie reference platform | NOT RUN | — | |
+| Pi 3B+ / Trixie reference platform | NOT RUN | — | |
 | Rootless tar execution | NOT RUN | — | |
 | Fresh Debian installation | NOT RUN | — | |
 | Managed identity and file ownership | NOT RUN | — | |
@@ -144,7 +146,7 @@ Reference `commands.log` and record any manual command not captured by a harness
 
 **Rationale:** NOT RECORDED
 
-**Reviewer:** NOT RECORDED  
+**Reviewer:** NOT RECORDED
 **Review timestamp, UTC:** NOT RECORDED
 
 After review, generate `EVIDENCE_SHA256SUMS` for every retained evidence file except the checksum file itself.

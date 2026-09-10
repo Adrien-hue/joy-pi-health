@@ -1,5 +1,4 @@
-# Service-specific fallback used only when the Pi 3B release gate proves that
+# Service-specific fallback used only when the Pi 3B+ release gate proves that
 # the preferred video-group plus closed device-policy mechanism is insufficient.
 ACTION=="add|change", KERNEL=="vcio", RUN+="/usr/bin/setfacl -m u:_joy-pi-health:r-- $devnode"
 ACTION=="add|change", KERNEL=="vcio_gencmd", RUN+="/usr/bin/setfacl -m u:_joy-pi-health:r-- $devnode"
-

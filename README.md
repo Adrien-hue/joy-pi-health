@@ -6,7 +6,7 @@ The service will expose one current snapshot of CPU, load, memory, root-filesyst
 
 ## Project status
 
-The v0.1 requirements and architecture are frozen and approved. The service now exposes real generic Linux host observations, trailing CPU utilization after its initial sampling interval, and Raspberry Pi SoC temperature and firmware health observations through the public HTTP/JSON snapshot contract. Debian and portable release packaging is implemented, but no release has been published and the real Pi 3B release gates have not yet been claimed.
+The v0.1 requirements and architecture are frozen and approved. The service now exposes real generic Linux host observations, trailing CPU utilization after its initial sampling interval, and Raspberry Pi SoC temperature and firmware health observations through the public HTTP/JSON snapshot contract. Debian and portable release packaging is implemented, but no release has been published and the real Pi 3B+ release gates have not yet been claimed.
 
 Canonical repository and Go module path:
 
@@ -22,7 +22,7 @@ These documents are frozen for v0.1. This README is an onboarding summary, not a
 
 ## Supported target
 
-The release-gating target is a real Raspberry Pi 3B running 64-bit Raspberry Pi OS Lite based on Debian 13 (Trixie). Raspberry Pi 3B+, 4B, and 5 are intended members of the supported hardware family, but v0.1 claims for those models must not exceed the validation evidence available for each model.
+The release-gating target is a real Raspberry Pi 3B+ running 64-bit Raspberry Pi OS Lite based on Debian 13 (Trixie). Raspberry Pi 3B, Pi 4B, and Pi 5 are intended members of the supported hardware family, but v0.1 claims for those models must not exceed the validation evidence available for each model.
 
 ## Security posture
 
@@ -69,7 +69,7 @@ On the supported Linux target, CPU utilization is initially `null` while the obs
 
 When systemd provides `NOTIFY_SOCKET`, the service sends `READY=1` after listener binding, firmware-executor initialization, the initial CPU baseline attempt, HTTP admission setup, and a minimal successful snapshot-capability probe. Manual execution does not require systemd. Expected metric degradation is logged to stderr on first occurrence, at most once every five minutes while unchanged, and once when it clears; successful requests are not logged. Stop the service with Ctrl+C.
 
-Compile the production code for the Raspberry Pi 3B architecture without executing it:
+Compile the production code for the ARMv8.0 Linux/ARM64 target without executing it:
 
 ```text
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GOARM64=v8.0 go build ./...
@@ -90,7 +90,7 @@ sh debian/build-release.sh
 sh test/release/validate-artifacts.sh dist
 ```
 
-The default managed permission profile combines the service's supplementary `video` credential with a closed systemd device policy for `/dev/vcio` and `/dev/vcio_gencmd`. The service remains unprivileged. An ACL build profile exists only as the frozen fallback for real Pi 3B validation:
+The default managed permission profile combines the service's supplementary `video` credential with a closed systemd device policy for `/dev/vcio` and `/dev/vcio_gencmd`. The service remains unprivileged. An ACL build profile exists only as the frozen fallback for real Pi 3B+ validation:
 
 ```text
 sh debian/build-release.sh --firmware-access acl
@@ -108,30 +108,30 @@ The package installs a managed systemd service at `/usr/bin/joy-pi-health`, crea
 
 GitHub Actions runs repository quality checks on Linux and Windows, performs Linux/ARM64 compile-only validation, and builds the release artifacts twice inside a pinned Debian Trixie environment. The Debian job calls the canonical release builder and validates the resulting package, systemd unit, archive, metadata, checksums, and reproducibility.
 
-CI outputs are retained only as labelled validation artifacts. They are not official releases and do not establish Raspberry Pi compatibility. The exact validated bytes must still pass the real Pi 3B release gates described in the [release-validation and handoff procedure](docs/release-validation.md).
+CI outputs are retained only as labelled validation artifacts. They are not official releases and do not establish Raspberry Pi compatibility. The exact validated bytes must still pass the real Pi 3B+ release gates described in the [release-validation and handoff procedure](docs/release-validation.md).
 
-## Raspberry Pi 3B release acceptance
+## Raspberry Pi 3B+ release acceptance
 
 The operator-assisted Class C procedure and evidence rules are defined in the [release-validation runbook](docs/release-validation.md). The committed harness must be frozen before physical measurements begin. It does not download CI artifacts, rebuild the service, install packages, invoke `sudo`, change firmware-device permissions, or decide that a release passed.
 
 Run its read-only stages on the Pi with explicit artifact and evidence directories:
 
 ```text
-sh test/release/pi3b/verify-readonly.sh verify-artifacts ARTIFACT_DIR EVIDENCE_DIR EXPECTED_COMMIT [video|acl]
-sh test/release/pi3b/verify-readonly.sh inspect-platform EVIDENCE_DIR
-sh test/release/pi3b/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
-sh test/release/pi3b/verify-readonly.sh managed EVIDENCE_DIR
+sh test/release/pi3bplus/verify-readonly.sh verify-artifacts ARTIFACT_DIR EVIDENCE_DIR EXPECTED_COMMIT [video|acl]
+sh test/release/pi3bplus/verify-readonly.sh inspect-platform EVIDENCE_DIR
+sh test/release/pi3bplus/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
+sh test/release/pi3bplus/verify-readonly.sh managed EVIDENCE_DIR
 ```
 
 The fixed performance procedures are:
 
 ```text
-sh test/release/pi3b/measure-performance.sh cpu EVIDENCE_DIR http://127.0.0.1:8080/v1/snapshot --allow-load
-sh test/release/pi3b/measure-performance.sh rss EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh idle-cpu EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh readiness EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh latency EVIDENCE_DIR
-sh test/release/pi3b/measure-performance.sh soak EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh cpu EVIDENCE_DIR http://127.0.0.1:8080/v1/snapshot --allow-load
+sh test/release/pi3bplus/measure-performance.sh rss EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh idle-cpu EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh readiness EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh latency EVIDENCE_DIR
+sh test/release/pi3bplus/measure-performance.sh soak EVIDENCE_DIR
 ```
 
 The CPU command starts a bounded `stress-ng` workload only with the explicit `--allow-load` acknowledgement. The readiness command requires an operator already authorized to start and stop the managed service. Package installation, systemd test overrides, firmware confinement probes, lifecycle operations, and final evidence review remain explicit operator steps.
@@ -139,10 +139,10 @@ The CPU command starts a bounded `stress-ng` workload only with the explicit `--
 When no older official package exists, create only the labelled, non-release lifecycle fixture described by the runbook:
 
 ```text
-sh test/release/pi3b/derive-lifecycle-fixture.sh CANDIDATE_DEB TEMPORARY_OUTPUT_DIRECTORY
+sh test/release/pi3bplus/derive-lifecycle-fixture.sh CANDIDATE_DEB TEMPORARY_OUTPUT_DIRECTORY
 ```
 
-Do not claim Pi 3B acceptance until every release-blocking Class A, Class B, and Class C gate has genuine reviewed evidence.
+Do not claim Pi 3B+ acceptance until every release-blocking Class A, Class B, and Class C gate has genuine reviewed evidence.
 
 ## License
 

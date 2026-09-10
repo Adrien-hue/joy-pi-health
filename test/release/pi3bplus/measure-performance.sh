@@ -7,12 +7,12 @@ default_url=http://127.0.0.1:8080/v1/snapshot
 usage() {
     cat >&2 <<'EOF'
 usage:
-  test/release/pi3b/measure-performance.sh rss EVIDENCE_DIR [SNAPSHOT_URL]
-  test/release/pi3b/measure-performance.sh idle-cpu EVIDENCE_DIR
-  test/release/pi3b/measure-performance.sh readiness EVIDENCE_DIR
-  test/release/pi3b/measure-performance.sh latency EVIDENCE_DIR [SNAPSHOT_URL]
-  test/release/pi3b/measure-performance.sh cpu EVIDENCE_DIR [SNAPSHOT_URL] --allow-load
-  test/release/pi3b/measure-performance.sh soak EVIDENCE_DIR [SNAPSHOT_URL]
+  test/release/pi3bplus/measure-performance.sh rss EVIDENCE_DIR [SNAPSHOT_URL]
+  test/release/pi3bplus/measure-performance.sh idle-cpu EVIDENCE_DIR
+  test/release/pi3bplus/measure-performance.sh readiness EVIDENCE_DIR
+  test/release/pi3bplus/measure-performance.sh latency EVIDENCE_DIR [SNAPSHOT_URL]
+  test/release/pi3bplus/measure-performance.sh cpu EVIDENCE_DIR [SNAPSHOT_URL] --allow-load
+  test/release/pi3bplus/measure-performance.sh soak EVIDENCE_DIR [SNAPSHOT_URL]
 
 Durations, sample counts, and release thresholds are fixed. The script never
 installs tools, invokes sudo, edits service configuration, or changes device
