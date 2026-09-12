@@ -1,11 +1,34 @@
 #!/bin/sh
 set -eu
+export LC_ALL=C
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 evaluator="$script_dir/cpu-evaluate.awk"
 harness="$script_dir/measure-performance.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
+
+fail() {
+    echo "joy-pi-health: $1" >&2
+    exit 1
+}
+
+assert_equal() {
+    expected=$1
+    actual=$2
+    label=$3
+    [ "$actual" = "$expected" ] || fail "$label: got $actual, expected $expected"
+}
+
+assert_summary_value() {
+    file=$1
+    key=$2
+    expected=$3
+    label=$4
+    awk -F= -v key="$key" -v expected="$expected" \
+        '$1 == key && $2 == expected {found=1} END {exit !found}' "$file" || \
+        fail "$label: expected $key=$expected"
+}
 
 make_fixture() {
     mode=$1
@@ -63,18 +86,16 @@ evaluate() {
         -f "$evaluator" "$fixture"
     status=$?
     set -e
-    [ "$status" -eq "$expected_status" ] || {
-        echo "joy-pi-health: $name returned $status, expected $expected_status" >&2
-        exit 1
-    }
-    grep -F "classification=$expected_classification" "$work/$name.summary.txt" >/dev/null
+    assert_equal "$expected_status" "$status" "$name evaluator status"
+    assert_summary_value "$work/$name.summary.txt" classification "$expected_classification" "$name classification"
 }
 
 evaluate 0 PASS shifted
-[ "$(awk 'END {print NR-1}' "$work/shifted.comparisons.tsv")" -eq 20 ]
+comparison_count=$(awk 'END {print NR-1}' "$work/shifted.comparisons.tsv")
+assert_equal 20 "$comparison_count" "shifted comparison count"
 evaluate 0 PASS boundary
-grep -F 'median_absolute_difference=5.000000' "$work/boundary.summary.txt" >/dev/null
-grep -F 'p95_absolute_difference=10.000000' "$work/boundary.summary.txt" >/dev/null
+assert_summary_value "$work/boundary.summary.txt" median_absolute_difference 5.000000 "boundary median"
+assert_summary_value "$work/boundary.summary.txt" p95_absolute_difference 10.000000 "boundary p95"
 evaluate 1 FAIL median-fail
 evaluate 1 FAIL p95-fail
 evaluate 1 FAIL service-full-fail
@@ -87,15 +108,17 @@ evaluate 2 BLOCKED counter-decrease
 evaluate 2 BLOCKED inconsistent-delta
 evaluate 2 BLOCKED invalid-interval
 evaluate 0 PASS weighted
-grep -F 'half	10	45.500000' "$work/weighted.plateaus.tsv" >/dev/null
+awk -F '\t' '$1 == "half" && $2 == "10" && $3 == "45.500000" {found=1} END {exit !found}' \
+    "$work/weighted.plateaus.tsv" || fail "weighted aggregate: expected half plateau with 10 samples at 45.500000 percent"
 
 mkdir -p "$work/existing/raw/cpu"
 set +e
 sh "$harness" cpu "$work/existing" --allow-load >"$work/refusal.out" 2>"$work/refusal.err"
 status=$?
 set -e
-[ "$status" -eq 1 ]
-grep -F 'refusing to overwrite existing CPU evidence directory' "$work/refusal.err" >/dev/null
+assert_equal 1 "$status" "existing evidence refusal status"
+grep -F 'refusing to overwrite existing CPU evidence directory' "$work/refusal.err" >/dev/null || \
+    fail "existing evidence refusal diagnostic is missing"
 
 sed '/^\[ "$#" -ge 1 \] || usage$/,$d' "$harness" >"$work/harness-functions.sh"
 (
@@ -104,16 +127,18 @@ sed '/^\[ "$#" -ge 1 \] || usage$/,$d' "$harness" >"$work/harness-functions.sh"
     : >"$cpu_response"
     sleep 30 &
     stress_pid=$!
+    owned_pid=$stress_pid
     cpu_cleanup
-    [ ! -e "$cpu_response" ]
-    ! kill -0 "$stress_pid" 2>/dev/null
+    [ ! -e "$cpu_response" ] || fail "CPU cleanup did not remove its temporary response"
+    if kill -0 "$owned_pid" 2>/dev/null; then
+        fail "CPU cleanup did not terminate and join its workload"
+    fi
 )
-grep -F "trap 'cpu_cleanup; exit 130' HUP INT TERM" "$harness" >/dev/null
-grep -F -- '--cpu-method loop' "$harness" >/dev/null
-grep -F -- '.cpu.logical_cpu_count == 4' "$harness" >/dev/null
+grep -F "trap 'cpu_cleanup; exit 130' HUP INT TERM" "$harness" >/dev/null || fail "CPU interruption cleanup trap is missing"
+grep -F -- '--cpu-method loop' "$harness" >/dev/null || fail "fixed CPU workload method is missing"
+grep -F -- '.cpu.logical_cpu_count == 4' "$harness" >/dev/null || fail "four-CPU service precondition is missing"
 if grep -F -- '--cpu-load 50' "$harness" >/dev/null; then
-    echo 'joy-pi-health: bursty --cpu-load 50 must not be used' >&2
-    exit 1
+    fail 'bursty --cpu-load 50 must not be used'
 fi
 
 echo 'Pi 3B+ CPU methodology tests passed'

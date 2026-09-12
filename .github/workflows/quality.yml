@@ -57,6 +57,7 @@ jobs:
       - name: Run tests
         run: go test ./...
       - name: Verify Raspberry Pi 3B+ release harness
+        if: runner.os == 'Linux'
         run: |
           bash -n test/release/validate-artifacts.sh test/release/pi3bplus/*.sh
           sh test/release/pi3bplus/model-validation-test.sh

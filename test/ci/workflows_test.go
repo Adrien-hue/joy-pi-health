@@ -49,6 +49,9 @@ func TestQualityWorkflowContract(t *testing.T) {
 			t.Errorf("quality workflow is missing %q", required)
 		}
 	}
+	if !regexp.MustCompile(`(?m)^\s+- name: Verify Raspberry Pi 3B\+ release harness\s*\n\s+if: runner\.os == 'Linux'\s*$`).MatchString(workflow) {
+		t.Error("quality workflow must restrict the Raspberry Pi release harness step to Linux")
+	}
 }
 
 func TestReleaseWorkflowContract(t *testing.T) {
