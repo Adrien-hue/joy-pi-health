@@ -6,6 +6,8 @@ The acceptance harness is frozen and reviewed before a physical run. A run must 
 
 > **Approved Class C CPU-methodology correction — 2026-09-12.** The original harness compared independently phased one-second CPU windows under a bursty nominal 50% workload. Physical Pi 3B+ execution demonstrated that this method cannot produce trustworthy pairwise error measurements. Results from that method remain `BLOCKED` and are not reinterpreted. CPU correctness is henceforth measured using stable idle, half-capacity, and full-capacity plateaus; service observations are compared with independently measured plateau aggregates. The existing 20-observation count, median ≤5 percentage-point threshold, p95 ≤10 percentage-point threshold, and ≥90% full-load threshold remain unchanged. Product CPU semantics and implementation are unchanged.
 
+> **Approved Class C fresh-install-equivalent baseline correction — 2026-09-13.** Class C may start from either the documented fresh Raspberry Pi OS image or a verified Joy Pi Health package-scoped reset on that same supported reference environment. The reset is accepted only when the complete pre-reset inventory and post-reset verification below prove that no package, dpkg, systemd, deb-systemd-helper, ACL, process, or listener state can alter first-install behavior. The intentionally retained service identity is valid only when it still matches policy. Journals, dpkg logs, and historical evidence remain untouched because they do not control package installation or service enablement. Any incomplete, ambiguous, or failed baseline verification is `BLOCKED`. This correction changes only the operational starting-state proof; package behavior and release thresholds are unchanged.
+
 ## Evidence classes
 
 - **Class A — developer:** deterministic unit, integration, contract, static-policy, native-build, and Linux/ARM64 compile-only checks.
@@ -71,7 +73,7 @@ Use separate `EVIDENCE_DIR/workstation` and `EVIDENCE_DIR/pi` destinations so ne
 
 ## 2. Pre-install reference-platform inspection
 
-Use a fresh reference image with no prior Joy Pi Health package. Installing acceptance tools does not make the application a runtime dependency, but the installations and versions must be recorded.
+Use either a fresh reference image with no prior Joy Pi Health package or the approved fresh-install-equivalent package reset below. Installing acceptance tools does not make the application a runtime dependency, but the installations and versions must be recorded. Record the baseline type as `fresh OS image` or `verified package reset`. Both baseline types run the post-reset package verifier; a genuinely fresh image skips only the pre-reset inventory and cleanup operations.
 
 Run:
 
@@ -91,9 +93,51 @@ Review and record:
 - thermal zones and their types;
 - firmware reference-tool version;
 - whether `policy-rc.d` is present;
-- absence of an installed Joy Pi Health package.
+- absence of an installed Joy Pi Health package and the package-state baseline result.
 
-Do not change device DAC, ACLs, ownership, groups, or service configuration before the managed permission test. If the image is not a fresh Pi 3B+ Trixie environment, mark the affected gates `BLOCKED` and stop.
+Do not change device DAC, ownership, groups, or unrelated service configuration before the managed permission test. The approved reset may remove only the exact Joy Pi Health state described below. If neither an eligible fresh image nor a verified package-reset baseline is available, mark the affected gates `BLOCKED` and stop.
+
+### 2.1 Fresh-install-equivalent package reset
+
+This reset establishes a package lifecycle starting state; it does not repair OS drift or replace the reference-platform checks. Use a new non-overwriting evidence destination. Historical evidence and stopped runs remain untouched.
+
+First capture the complete state without changing it:
+
+```text
+sudo sh test/release/pi3bplus/verify-readonly.sh package-baseline pre CANDIDATE_DEB EVIDENCE_DIR
+```
+
+Review every Joy Pi Health mask, alias, link, override, drop-in, and ACL before cleanup. Unknown administrator state is `BLOCKED`. A prior acceptance-created drop-in or mask may be removed only when its exact path and hash or creation command are recorded in that run's evidence. Resolve the exact path before removal; never recursively remove a systemd directory.
+
+Purge the named package, then clear only its enable-once helper records through the Debian interface:
+
+```sh
+sudo apt purge -y joy-pi-health
+sudo env DPKG_MAINTSCRIPT_PACKAGE=joy-pi-health DPKG_MAINTSCRIPT_NAME=postrm \
+  deb-systemd-helper purge joy-pi-health.service
+sudo systemctl daemon-reload
+```
+
+If the pre-reset evidence shows a residual `_joy-pi-health` ACL from an earlier ACL-profile package, remove only that named ACL entry with `setfacl -x u:_joy-pi-health` from the existing `/dev/vcio` or `/dev/vcio_gencmd` node. Do not change device ownership, group, mode, or any other ACL entry. Use `systemctl unmask joy-pi-health.service` only for a proven Joy Pi Health mask created by an earlier acceptance run. Remove only an acceptance-created drop-in whose exact recorded path and hash match; any unknown file remains a blocker.
+
+Verify the result before installing anything:
+
+```text
+sudo sh test/release/pi3bplus/verify-readonly.sh package-baseline post CANDIDATE_DEB EVIDENCE_DIR
+```
+
+The verifier requires all of the following:
+
+- no dpkg package record or selection, candidate payload path, dpkg info file, pending update, statoverride, diversion, or trigger state for Joy Pi Health;
+- `LoadState=not-found`, no successful `is-enabled` result, and no Joy Pi Health unit, alias, enablement link, mask, drop-in, override, or matching symlink target under `/etc/systemd` or `/run/systemd`;
+- no Joy Pi Health state in the system or user `deb-systemd-helper` directories;
+- no package ACL, lingering service-identity process, or listener already occupying port 8080;
+- the service identity is absent or is locked with the expected primary group, `/nonexistent` home, `/usr/sbin/nologin` shell, and no unexpected persistent supplementary membership; and
+- `/usr/sbin/policy-rc.d` state is recorded.
+
+Valid retained identity, journals, dpkg logs, artifact staging, and current or historical evidence are allowed. Numeric UID/GID identity values need not match a newly imaged host. These records do not direct dpkg or systemd behavior; altered identity properties do and therefore block the baseline.
+
+Every post-reset check must pass. Missing commands, unreadable state, unknown administrator files, evidence overwrite, or any residue is `BLOCKED`, not a product `FAIL`. If service policy prevents automatic startup after installation, the automatic-start observation is `BLOCKED`; do not bypass it manually. The helper purge command above is a baseline-establishment exception and must never be used during the candidate's lifecycle/purge gate.
 
 For model validation, remove device-tree NUL terminators, normalize only a canonical numeric ` Rev <number>` suffix, and require the remaining name to equal `Raspberry Pi 3 Model B Plus` exactly. Similar prefixes, Raspberry Pi 3 Model B, Pi 4, Pi 5, arbitrary suffixes, whitespace changes, and malformed values do not satisfy the gate.
 
@@ -118,6 +162,8 @@ sudo apt install ./joy-pi-health_0.1.0-1_arm64.deb
 ```
 
 If policy blocks automatic start, record that as correct Debian-policy behavior and explicitly start the service for later checks.
+
+For the fresh-install gate itself, install through apt only. Do not run `systemctl enable`, `systemctl start`, or a maintainer script directly. From a verified baseline, a policy-permitted candidate that fails installation, first-install enablement, or automatic startup is `FAIL`. A policy-blocked observation is `BLOCKED`; later managed checks may start the service only after the fresh-install result has been classified and preserved.
 
 Verify manually:
 
@@ -261,6 +307,8 @@ Create one labelled administrator-owned drop-in under `/etc/systemd/system/joy-p
 
 Verify restart-only-when-running behavior, intentionally stopped behavior, removal of package-owned assets, retention of the administrator drop-in, service identity, and journal, and absence of state migration. Remove only the acceptance-created drop-in during cleanup.
 
+After the lifecycle purge, require the same package-state invariants used by the post-reset verifier. Do not run the compensating baseline helper purge during this gate. Helper residue or a subsequent install that does not follow first-install enable/start behavior is a package lifecycle `FAIL` when the environment is otherwise valid.
+
 ## 11. Performance and endurance
 
 Restore the exact `0.1.0-1` package, final packaged unit, default loopback settings, and accepted permission profile first. Record ambient load, temperature, CPU frequency/governor, memory, tool versions, and process identity without tuning the machine in response to results.
@@ -343,13 +391,13 @@ systemctl cat joy-pi-health.service
 systemctl show joy-pi-health.service -p Type -p NotifyAccess -p User -p Group -p SupplementaryGroups -p MainPID -p NRestarts
 ```
 
-Perform the fresh installation and final restoration:
+Perform the fresh installation through apt alone:
 
 ```sh
 sudo apt install ./joy-pi-health_0.1.0-1_arm64.deb
-sudo systemctl enable joy-pi-health.service
-sudo systemctl start joy-pi-health.service
 ```
+
+Do not manually enable or start the service while classifying fresh installation. If a later test deliberately leaves the service stopped, an operator start used solely to prepare a subsequent managed test must be recorded after the fresh-install result and must not be cited as installation evidence.
 
 For each exit-status case, create only this runtime drop-in and replace the final `ExecStart` line with the case under test:
 
@@ -422,10 +470,11 @@ The acceptance-created administrator drop-in must be a uniquely named file benea
 
 ## Commit boundaries
 
-The corrected harness/runbook is reviewed and committed before physical testing, separately from evidence. Record candidate and harness SHAs independently; the directory name must contain both short SHAs so evidence from different harnesses cannot be mixed. A suitable harness commit is:
+The corrected harness/runbook is reviewed and committed before physical testing, separately from evidence. A package behavior correction is a separate commit and requires new Class A/Class B candidate bytes. Record candidate and harness SHAs independently; the directory name must contain both short SHAs so evidence from different harnesses cannot be mixed. Suitable focused commits for the 2026-09-13 corrections are:
 
 ```text
-test: correct Pi 3B+ CPU acceptance methodology
+test: approve Pi package-reset acceptance baseline
+fix: purge Joy Pi Health systemd helper state
 ```
 
 During physical measurement, do not commit. After the completed run, a separate evidence-only change may add genuine reviewed results. A suitable later commit is:

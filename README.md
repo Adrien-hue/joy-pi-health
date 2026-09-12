@@ -119,6 +119,8 @@ Run its read-only stages on the Pi with explicit artifact and evidence directori
 ```text
 sh test/release/pi3bplus/verify-readonly.sh verify-artifacts ARTIFACT_DIR EVIDENCE_DIR EXPECTED_COMMIT [video|acl]
 sh test/release/pi3bplus/verify-readonly.sh inspect-platform EVIDENCE_DIR
+sudo sh test/release/pi3bplus/verify-readonly.sh package-baseline pre CANDIDATE_DEB EVIDENCE_DIR
+sudo sh test/release/pi3bplus/verify-readonly.sh package-baseline post CANDIDATE_DEB EVIDENCE_DIR
 sh test/release/pi3bplus/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
 sh test/release/pi3bplus/verify-readonly.sh managed EVIDENCE_DIR
 ```

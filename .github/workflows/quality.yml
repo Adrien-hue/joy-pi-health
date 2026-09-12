@@ -62,6 +62,7 @@ jobs:
           bash -n test/release/validate-artifacts.sh test/release/pi3bplus/*.sh
           sh test/release/pi3bplus/model-validation-test.sh
           sh test/release/pi3bplus/cpu-methodology-test.sh
+          sh test/release/pi3bplus/package-baseline-test.sh
       - name: Run vet
         run: go vet ./...
       - name: Build

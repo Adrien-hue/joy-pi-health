@@ -44,6 +44,7 @@ func TestQualityWorkflowContract(t *testing.T) {
 		"bash -n test/release/validate-artifacts.sh test/release/pi3bplus/*.sh",
 		"sh test/release/pi3bplus/model-validation-test.sh",
 		"sh test/release/pi3bplus/cpu-methodology-test.sh",
+		"sh test/release/pi3bplus/package-baseline-test.sh",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("quality workflow is missing %q", required)
@@ -65,6 +66,7 @@ func TestReleaseWorkflowContract(t *testing.T) {
 		"dash -n debian/build-release.sh debian/postinst debian/prerm debian/postrm test/release/validate-artifacts.sh test/release/pi3bplus/*.sh",
 		"sh test/release/pi3bplus/model-validation-test.sh",
 		"sh test/release/pi3bplus/cpu-methodology-test.sh",
+		"sh test/release/pi3bplus/package-baseline-test.sh",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("release workflow is missing %q", required)

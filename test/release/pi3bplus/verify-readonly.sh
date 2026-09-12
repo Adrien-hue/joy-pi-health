@@ -9,6 +9,8 @@ usage() {
 usage:
   test/release/pi3bplus/verify-readonly.sh verify-artifacts ARTIFACT_DIR EVIDENCE_DIR EXPECTED_COMMIT [video|acl]
   test/release/pi3bplus/verify-readonly.sh inspect-platform EVIDENCE_DIR
+  test/release/pi3bplus/verify-readonly.sh package-baseline pre CANDIDATE_DEB EVIDENCE_DIR
+  test/release/pi3bplus/verify-readonly.sh package-baseline post CANDIDATE_DEB EVIDENCE_DIR
   test/release/pi3bplus/verify-readonly.sh rootless ARTIFACT_DIR EVIDENCE_DIR
   test/release/pi3bplus/verify-readonly.sh managed EVIDENCE_DIR
   test/release/pi3bplus/verify-readonly.sh validate-model MODEL_FILE
@@ -18,6 +20,298 @@ configuration, or invokes sudo. It writes only below EVIDENCE_DIR and temporary
 directories that it creates.
 EOF
     exit 2
+}
+
+baseline_check() {
+    name=$1
+    status=$2
+    detail=$3
+    printf '%s\t%s\t%s\n' "$name" "$status" "$detail" >>"$baseline_checks"
+}
+
+package_baseline() {
+    [ "$#" -eq 3 ] || usage
+    stage=$1
+    candidate_deb=$2
+    case "$stage" in pre|post) ;; *) usage ;; esac
+    [ -f "$candidate_deb" ] || {
+        echo "joy-pi-health: candidate Debian package is missing: $candidate_deb" >&2
+        exit 1
+    }
+    candidate_deb=$(CDPATH= cd -- "$(dirname -- "$candidate_deb")" && pwd)/$(basename -- "$candidate_deb")
+    prepare_evidence "$3"
+    [ "$(id -u)" -eq 0 ] || {
+        echo 'joy-pi-health: package baseline inspection must run as root for complete read-only evidence' >&2
+        exit 1
+    }
+    for command_name in awk basename dpkg dpkg-deb dpkg-divert dpkg-query dpkg-statoverride find getent getfacl grep id passwd pgrep sed ss stat systemctl; do
+        require_command "$command_name"
+    done
+
+    baseline_report="$evidence_dir/raw/package-baseline-$stage.txt"
+    baseline_checks="$evidence_dir/raw/package-baseline-$stage-checks.tsv"
+    baseline_summary="$evidence_dir/raw/package-baseline-$stage-summary.txt"
+    for output in "$baseline_report" "$baseline_checks" "$baseline_summary"; do
+        [ ! -e "$output" ] || {
+            echo "joy-pi-health: refusing to overwrite package baseline evidence: $output" >&2
+            exit 1
+        }
+    done
+    : >"$baseline_checks"
+
+    {
+        record_command package-query dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package} ${Version} ${Architecture}\n' joy-pi-health || true
+        record_command package-selection dpkg --get-selections joy-pi-health || true
+        record_command package-payload dpkg-deb --contents "$candidate_deb" || true
+        record_command systemd-show systemctl show joy-pi-health.service -p LoadState -p ActiveState -p SubState -p UnitFileState -p FragmentPath || true
+        record_command systemd-enabled systemctl is-enabled joy-pi-health.service || true
+        record_command systemd-active systemctl is-active joy-pi-health.service || true
+        record_command systemd-paths find /etc/systemd /run/systemd -xdev \( -iname '*joy-pi-health*' -o \( -type l -lname '*joy-pi-health*' \) \) -ls || true
+        record_command helper-system-state find /var/lib/systemd/deb-systemd-helper-enabled -iname '*joy-pi-health*' -ls || true
+        record_command helper-system-content grep -FR joy-pi-health /var/lib/systemd/deb-systemd-helper-enabled || true
+        record_command helper-user-state find /var/lib/systemd/deb-systemd-user-helper-enabled -iname '*joy-pi-health*' -ls || true
+        record_command helper-user-content grep -FR joy-pi-health /var/lib/systemd/deb-systemd-user-helper-enabled || true
+        record_command dpkg-info-state find /var/lib/dpkg/info -maxdepth 1 -name 'joy-pi-health.*' -ls || true
+        record_command dpkg-statoverrides dpkg-statoverride --list || true
+        record_command dpkg-diversions dpkg-divert --list || true
+        record_command dpkg-triggers grep -FR joy-pi-health /var/lib/dpkg/triggers || true
+        record_command dpkg-pending-updates grep -FR joy-pi-health /var/lib/dpkg/updates || true
+        record_command retained-passwd getent passwd _joy-pi-health || true
+        record_command retained-group getent group _joy-pi-health || true
+        record_command retained-lock passwd -S _joy-pi-health || true
+        record_command retained-memberships id _joy-pi-health || true
+        record_command retained-processes pgrep -a -u _joy-pi-health || true
+        record_command listeners ss -H -ltn || true
+        printf '\n===== firmware ACLs\n'
+        for device in /dev/vcio /dev/vcio_gencmd; do
+            if [ -e "$device" ]; then
+                getfacl -cp "$device" || true
+            else
+                echo "$device absent"
+            fi
+        done
+        printf '\n===== policy-rc.d\n'
+        if [ -e /usr/sbin/policy-rc.d ]; then
+            stat -Lc '%n owner=%U group=%G mode=%a' /usr/sbin/policy-rc.d
+        else
+            echo absent
+        fi
+    } >"$baseline_report" 2>&1
+
+    if [ "$stage" = pre ]; then
+        printf '%s\n' 'classification=INVENTORY_ONLY' >"$baseline_summary"
+        echo 'package baseline pre-reset inventory completed'
+        return
+    fi
+
+    package_query=$(dpkg-query -W joy-pi-health 2>&1) && package_query_rc=0 || package_query_rc=$?
+    case "$package_query_rc" in
+        0) baseline_check package_query_absent BLOCKED 'dpkg-query still has a package record' ;;
+        1) baseline_check package_query_absent PASS 'no dpkg-query package record' ;;
+        *) baseline_check package_query_absent BLOCKED "dpkg-query inspection failed: $package_query" ;;
+    esac
+
+    package_selection=$(dpkg --get-selections joy-pi-health 2>&1) && package_selection_rc=0 || package_selection_rc=$?
+    if [ "$package_selection_rc" -ne 0 ]; then
+        baseline_check selection_absent BLOCKED "dpkg selection inspection failed: $package_selection"
+    elif printf '%s\n' "$package_selection" | grep -E '^joy-pi-health[[:space:]]' >/dev/null; then
+        baseline_check selection_absent BLOCKED 'dpkg selection remains'
+    else
+        baseline_check selection_absent PASS 'no dpkg selection remains'
+    fi
+
+    payload_residue=
+    while IFS= read -r payload_path; do
+        case "$payload_path" in ''|./) continue ;; esac
+        absolute_path=/${payload_path#./}
+        if [ -e "$absolute_path" ] || [ -L "$absolute_path" ]; then
+            payload_residue="$payload_residue $absolute_path"
+        fi
+    done <<EOF
+$(dpkg-deb --contents "$candidate_deb" | awk '$1 !~ /^d/ || $6 ~ /joy-pi-health/ {print $6}')
+EOF
+    if [ -n "$payload_residue" ]; then
+        baseline_check payload_absent BLOCKED "candidate payload remains:$payload_residue"
+    else
+        baseline_check payload_absent PASS 'candidate payload is absent'
+    fi
+
+    if [ ! -d /var/lib/dpkg/info ] || [ ! -r /var/lib/dpkg/info ]; then
+        baseline_check dpkg_info_absent BLOCKED 'dpkg info directory is missing or unreadable'
+    else
+        dpkg_info_residue=$(find /var/lib/dpkg/info -maxdepth 1 -name 'joy-pi-health.*' -print) && dpkg_info_rc=0 || dpkg_info_rc=$?
+        if [ "$dpkg_info_rc" -ne 0 ]; then
+            baseline_check dpkg_info_absent BLOCKED 'dpkg info inspection failed'
+        elif [ -n "$dpkg_info_residue" ]; then
+            baseline_check dpkg_info_absent BLOCKED 'dpkg info files remain'
+        else
+            baseline_check dpkg_info_absent PASS 'no dpkg info files remain'
+        fi
+    fi
+
+    dpkg_residue=
+    dpkg_state_error=
+    if [ ! -r /var/lib/dpkg/status ]; then
+        dpkg_state_error=' /var/lib/dpkg/status'
+    fi
+    for state_file in /var/lib/dpkg/status /var/lib/dpkg/statoverride /var/lib/dpkg/diversions /var/lib/dpkg/triggers/File /var/lib/dpkg/triggers/Unincorp; do
+        if [ -f "$state_file" ]; then
+            if [ ! -r "$state_file" ]; then
+                dpkg_state_error="$dpkg_state_error $state_file"
+            elif grep -F joy-pi-health "$state_file" >/dev/null 2>&1; then
+                dpkg_residue="$dpkg_residue $state_file"
+            fi
+        fi
+    done
+    if [ -d /var/lib/dpkg/updates ]; then
+        if [ ! -r /var/lib/dpkg/updates ]; then
+            dpkg_state_error="$dpkg_state_error /var/lib/dpkg/updates"
+        else
+            update_residue=$(grep -FRl joy-pi-health /var/lib/dpkg/updates 2>/dev/null) && update_rc=0 || update_rc=$?
+            case "$update_rc" in
+                0) dpkg_residue="$dpkg_residue /var/lib/dpkg/updates" ;;
+                1) ;;
+                *) dpkg_state_error="$dpkg_state_error /var/lib/dpkg/updates" ;;
+            esac
+        fi
+    fi
+    if [ -n "$dpkg_state_error" ]; then
+        baseline_check dpkg_state_absent BLOCKED "dpkg state is unreadable:$dpkg_state_error"
+    elif [ -n "$dpkg_residue" ]; then
+        baseline_check dpkg_state_absent BLOCKED "dpkg state remains:$dpkg_residue"
+    else
+        baseline_check dpkg_state_absent PASS 'no package-specific dpkg state remains'
+    fi
+
+    load_state=$(systemctl show joy-pi-health.service -p LoadState --value 2>/dev/null || true)
+    if [ "$load_state" = not-found ]; then
+        baseline_check unit_not_found PASS 'systemd reports LoadState=not-found'
+    else
+        baseline_check unit_not_found BLOCKED "systemd LoadState=$load_state"
+    fi
+
+    enabled_state=$(systemctl is-enabled joy-pi-health.service 2>&1) && enabled_rc=0 || enabled_rc=$?
+    if [ "$enabled_rc" -ne 0 ] && [ "$enabled_state" = not-found ]; then
+        baseline_check unit_not_enabled PASS "is-enabled rejected absent unit: $enabled_state"
+    else
+        baseline_check unit_not_enabled BLOCKED "unexpected is-enabled result rc=$enabled_rc: $enabled_state"
+    fi
+
+    if [ ! -d /etc/systemd ] || [ ! -r /etc/systemd ] || [ ! -d /run/systemd ] || [ ! -r /run/systemd ]; then
+        baseline_check systemd_state_absent BLOCKED 'systemd state roots are missing or unreadable'
+    else
+        systemd_residue=$(find /etc/systemd /run/systemd -xdev \( -iname '*joy-pi-health*' -o \( -type l -lname '*joy-pi-health*' \) \) -print 2>/dev/null) && systemd_rc=0 || systemd_rc=$?
+        if [ "$systemd_rc" -ne 0 ]; then
+            baseline_check systemd_state_absent BLOCKED 'systemd state inspection failed'
+        elif [ -n "$systemd_residue" ]; then
+            baseline_check systemd_state_absent BLOCKED 'systemd link, mask, alias, drop-in, or override remains'
+        else
+            baseline_check systemd_state_absent PASS 'no package-specific systemd state remains'
+        fi
+    fi
+
+    helper_system=/var/lib/systemd/deb-systemd-helper-enabled
+    if [ ! -d "$helper_system" ] || [ ! -r "$helper_system" ]; then
+        baseline_check helper_system_absent BLOCKED 'system helper state directory is missing or unreadable'
+    else
+        helper_system_residue=$(find "$helper_system" \( -iname '*joy-pi-health*' -o \( -type l -lname '*joy-pi-health*' \) \) -print) && helper_system_rc=0 || helper_system_rc=$?
+        helper_system_content=$(grep -FRl joy-pi-health "$helper_system" 2>/dev/null) && helper_system_content_rc=0 || helper_system_content_rc=$?
+        if [ "$helper_system_rc" -ne 0 ] || [ "$helper_system_content_rc" -gt 1 ]; then
+            baseline_check helper_system_absent BLOCKED 'system helper state inspection failed'
+        elif [ -n "$helper_system_residue" ] || [ -n "$helper_system_content" ]; then
+            baseline_check helper_system_absent BLOCKED 'system helper state remains'
+        else
+            baseline_check helper_system_absent PASS 'no system helper state remains'
+        fi
+    fi
+    helper_user=/var/lib/systemd/deb-systemd-user-helper-enabled
+    if [ ! -e "$helper_user" ]; then
+        baseline_check helper_user_absent PASS 'user helper state directory is absent'
+    elif [ ! -d "$helper_user" ] || [ ! -r "$helper_user" ]; then
+        baseline_check helper_user_absent BLOCKED 'user helper state path is not a readable directory'
+    else
+        helper_user_residue=$(find "$helper_user" \( -iname '*joy-pi-health*' -o \( -type l -lname '*joy-pi-health*' \) \) -print) && helper_user_rc=0 || helper_user_rc=$?
+        helper_user_content=$(grep -FRl joy-pi-health "$helper_user" 2>/dev/null) && helper_user_content_rc=0 || helper_user_content_rc=$?
+        if [ "$helper_user_rc" -ne 0 ] || [ "$helper_user_content_rc" -gt 1 ]; then
+            baseline_check helper_user_absent BLOCKED 'user helper state inspection failed'
+        elif [ -n "$helper_user_residue" ] || [ -n "$helper_user_content" ]; then
+            baseline_check helper_user_absent BLOCKED 'user helper state remains'
+        else
+            baseline_check helper_user_absent PASS 'no user helper state remains'
+        fi
+    fi
+
+    acl_residue=
+    acl_error=
+    for device in /dev/vcio /dev/vcio_gencmd; do
+        if [ -e "$device" ]; then
+            if device_acl=$(getfacl -cp "$device" 2>/dev/null); then
+                if printf '%s\n' "$device_acl" | grep -F 'user:_joy-pi-health:' >/dev/null; then
+                    acl_residue="$acl_residue $device"
+                fi
+            else
+                acl_error="$acl_error $device"
+            fi
+        fi
+    done
+    if [ -n "$acl_error" ]; then
+        baseline_check acl_absent BLOCKED "firmware ACL inspection failed:$acl_error"
+    elif [ -n "$acl_residue" ]; then
+        baseline_check acl_absent BLOCKED "service ACL remains:$acl_residue"
+    else
+        baseline_check acl_absent PASS 'no service ACL remains'
+    fi
+
+    identity_present=false
+    if identity=$(getent passwd _joy-pi-health); then
+        identity_present=true
+        identity_home=$(printf '%s\n' "$identity" | awk -F: '{print $6}')
+        identity_shell=$(printf '%s\n' "$identity" | awk -F: '{print $7}')
+        identity_gid=$(printf '%s\n' "$identity" | awk -F: '{print $4}')
+        identity_group=$(getent group "$identity_gid" | awk -F: '{print $1}')
+        identity_lock=$(passwd -S _joy-pi-health 2>/dev/null | awk '{print $2}')
+        identity_groups=$(id -Gn _joy-pi-health 2>/dev/null)
+        if [ "$identity_home" = /nonexistent ] && [ "$identity_shell" = /usr/sbin/nologin ] && \
+           [ "$identity_group" = _joy-pi-health ] && [ "$identity_lock" = L ] && \
+           [ "$identity_groups" = _joy-pi-health ]; then
+            baseline_check identity_valid PASS 'retained service identity matches policy'
+        else
+            baseline_check identity_valid BLOCKED 'retained service identity differs from policy'
+        fi
+    else
+        baseline_check identity_valid PASS 'service identity is absent'
+    fi
+
+    if [ "$identity_present" = false ]; then
+        baseline_check process_absent PASS 'service identity is absent, so it owns no process'
+    else
+        pgrep -u _joy-pi-health >/dev/null 2>&1 && process_rc=0 || process_rc=$?
+        case "$process_rc" in
+            0) baseline_check process_absent BLOCKED 'a process owned by the service identity remains' ;;
+            1) baseline_check process_absent PASS 'no process owned by the service identity remains' ;;
+            *) baseline_check process_absent BLOCKED 'service process inspection failed' ;;
+        esac
+    fi
+    if ! listeners=$(ss -H -ltn 2>&1); then
+        baseline_check port_available BLOCKED "listener inspection failed: $listeners"
+    elif printf '%s\n' "$listeners" | awk '$4 ~ /:8080$/ {found=1} END {exit !found}'; then
+        baseline_check port_available BLOCKED 'a listener already occupies port 8080'
+    else
+        baseline_check port_available PASS 'port 8080 has no listener'
+    fi
+    if [ -e /usr/sbin/policy-rc.d ]; then
+        baseline_check policy_recorded PASS 'policy-rc.d is present; automatic-start result requires BLOCKED review if denied'
+    else
+        baseline_check policy_recorded PASS 'policy-rc.d is absent'
+    fi
+
+    evaluator=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/package-baseline-evaluate.awk
+    if awk -f "$evaluator" "$baseline_checks" >"$baseline_summary"; then
+        echo 'package baseline post-reset verification passed'
+    else
+        echo 'joy-pi-health: package baseline is BLOCKED; review the retained evidence' >&2
+        return 1
+    fi
 }
 
 require_command() {
@@ -439,6 +733,7 @@ shift
 case "$mode" in
     verify-artifacts) verify_artifacts "$@" ;;
     inspect-platform) inspect_platform "$@" ;;
+    package-baseline) package_baseline "$@" ;;
     rootless) rootless "$@" ;;
     managed) managed "$@" ;;
     validate-model) validate_model_file "$@" ;;

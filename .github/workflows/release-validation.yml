@@ -74,6 +74,7 @@ jobs:
           dash -n debian/build-release.sh debian/postinst debian/prerm debian/postrm test/release/validate-artifacts.sh test/release/pi3bplus/*.sh
           sh test/release/pi3bplus/model-validation-test.sh
           sh test/release/pi3bplus/cpu-methodology-test.sh
+          sh test/release/pi3bplus/package-baseline-test.sh
       - name: Build and validate first artifact set
         shell: bash
         run: |

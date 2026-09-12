@@ -20,6 +20,12 @@ Copy this template to `pi3bplus-<UTC-date>-<candidate-short-SHA>-h<harness-short
 | CI run ID / attempt | NOT RECORDED |
 | CI artifact name | NOT RECORDED |
 | Firmware permission profile | NOT RECORDED |
+| Starting baseline type (`fresh OS image` or `verified package reset`) | NOT RECORDED |
+| Package baseline classification | NOT RUN |
+| Pre-reset inventory (`NOT APPLICABLE` for fresh image) | NOT RUN |
+| Post-reset verification | NOT RUN |
+| Retained service identity result | NOT RUN |
+| `policy-rc.d` state for automatic start | NOT RECORDED |
 | Operator | NOT RECORDED |
 | Started at, UTC | NOT RECORDED |
 | Completed at, UTC | NOT RECORDED |
@@ -70,7 +76,8 @@ Use only `PASS`, `FAIL`, `NOT RUN`, or `BLOCKED`. Add the exact raw-evidence pat
 | Pi artifact identity | NOT RUN | — | |
 | Pi 3B+ / Trixie reference platform | NOT RUN | — | |
 | Rootless tar execution | NOT RUN | — | |
-| Fresh Debian installation | NOT RUN | — | |
+| Fresh or verified fresh-install-equivalent Debian installation | NOT RUN | — | |
+| Package baseline state | NOT RUN | — | |
 | Managed identity and file ownership | NOT RUN | — | |
 | systemd readiness semantics | NOT RUN | — | |
 | Clean shutdown within two seconds | NOT RUN | — | |
