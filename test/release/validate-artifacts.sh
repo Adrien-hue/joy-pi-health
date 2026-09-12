@@ -108,6 +108,8 @@ grep -F 'deb-systemd-invoke start' "$control_root/postinst" >/dev/null
 grep -F 'deb-systemd-invoke try-restart' "$control_root/postinst" >/dev/null
 grep -F 'deb-systemd-invoke stop' "$control_root/prerm" >/dev/null
 grep -F 'deb-systemd-helper disable' "$control_root/prerm" >/dev/null
+grep -F 'deb-systemd-helper purge' "$control_root/postrm" >/dev/null
+grep -F '[ "${1:-}" = purge ]' "$control_root/postrm" >/dev/null
 if grep -E 'systemctl( --system)? (start|stop|restart|try-restart|enable|disable)( |$)' "$control_root"/postinst "$control_root"/prerm "$control_root"/postrm >/dev/null; then
     echo "joy-pi-health: maintainer script bypasses Debian service policy helpers" >&2
     exit 1

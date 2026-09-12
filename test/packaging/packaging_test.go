@@ -2,8 +2,10 @@ package packaging_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -71,6 +73,7 @@ func TestServiceIdentity(t *testing.T) {
 func TestMaintainerScriptsUsePolicyAwareHelpers(t *testing.T) {
 	postinst := read(t, "debian", "postinst")
 	prerm := read(t, "debian", "prerm")
+	postrm := read(t, "debian", "postrm")
 	for _, required := range []string{
 		"deb-systemd-helper enable", "deb-systemd-invoke start", "deb-systemd-invoke try-restart",
 	} {
@@ -99,11 +102,55 @@ func TestMaintainerScriptsUsePolicyAwareHelpers(t *testing.T) {
 	if !strings.Contains(prerm, `if [ "${1:-}" = remove ]`) {
 		t.Error("prerm service removal is not limited to the remove action")
 	}
+	purgeBranch := regexp.MustCompile(`(?s)if\s+\[\s+"\$\{1:-\}"\s+=\s+purge\s+\]\s*;\s*then\s+deb-systemd-helper\s+purge\s+"\$unit"\s*\n\s*fi`)
+	if !purgeBranch.MatchString(postrm) {
+		t.Error("postrm does not purge deb-systemd-helper state only on package purge")
+	}
 	for _, script := range []string{"postinst", "prerm", "postrm"} {
 		contents := read(t, "debian", script)
 		if strings.Contains(contents, "/etc/systemd/system/joy-pi-health.service.d") || strings.Contains(contents, "journalctl --vacuum") {
 			t.Errorf("%s alters administrator-owned state", script)
 		}
+	}
+}
+
+func TestPostrmPurgesHelperStateOnlyForPurge(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("maintainer scripts execute only on the Linux package target")
+	}
+
+	bin := t.TempDir()
+	logPath := filepath.Join(bin, "helper.log")
+	writeExecutable := func(name, contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(contents), 0o755); err != nil {
+			t.Fatalf("write %s stub: %v", name, err)
+		}
+	}
+	writeExecutable("deb-systemd-helper", "#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"$HELPER_LOG\"\n")
+	writeExecutable("systemctl", "#!/bin/sh\nexit 0\n")
+	t.Setenv("HELPER_LOG", logPath)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	postrm := filepath.Join("..", "..", "debian", "postrm")
+	if output, err := exec.Command("sh", postrm, "remove").CombinedOutput(); err != nil {
+		t.Fatalf("postrm remove: %v\n%s", err, output)
+	}
+	if contents, err := os.ReadFile(logPath); err == nil && len(contents) != 0 {
+		t.Fatalf("postrm remove purged helper state: %q", contents)
+	} else if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read helper log after remove: %v", err)
+	}
+
+	if output, err := exec.Command("sh", postrm, "purge").CombinedOutput(); err != nil {
+		t.Fatalf("postrm purge: %v\n%s", err, output)
+	}
+	contents, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read helper log after purge: %v", err)
+	}
+	if string(contents) != "purge joy-pi-health.service\n" {
+		t.Fatalf("unexpected helper invocation: %q", contents)
 	}
 }
 
