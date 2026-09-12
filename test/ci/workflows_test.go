@@ -43,6 +43,7 @@ func TestQualityWorkflowContract(t *testing.T) {
 		"CGO_ENABLED", "GOOS: linux", "GOARCH: arm64", "GOARM64: v8.0", "./test/packaging", "./test/ci",
 		"bash -n test/release/validate-artifacts.sh test/release/pi3bplus/*.sh",
 		"sh test/release/pi3bplus/model-validation-test.sh",
+		"sh test/release/pi3bplus/cpu-methodology-test.sh",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("quality workflow is missing %q", required)
@@ -60,6 +61,7 @@ func TestReleaseWorkflowContract(t *testing.T) {
 		"joy-pi-health-v0.1.0-release.json", "SHA256SUMS",
 		"dash -n debian/build-release.sh debian/postinst debian/prerm debian/postrm test/release/validate-artifacts.sh test/release/pi3bplus/*.sh",
 		"sh test/release/pi3bplus/model-validation-test.sh",
+		"sh test/release/pi3bplus/cpu-methodology-test.sh",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("release workflow is missing %q", required)

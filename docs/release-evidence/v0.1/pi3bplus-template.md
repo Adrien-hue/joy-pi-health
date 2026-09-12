@@ -4,7 +4,7 @@
 **Normative gates:** [v0.1 requirements](../../requirements-v0.1.md)
 **Procedure:** [release-validation runbook](../../release-validation.md)
 
-Copy this template to `pi3bplus-<UTC-date>-<candidate-short-SHA>/result.md` only for a real completed or stopped Class C run. Never infer a pass or remove an unperformed gate.
+Copy this template to `pi3bplus-<UTC-date>-<candidate-short-SHA>-h<harness-short-SHA>/result.md` only for a real completed or stopped Class C run. The candidate and harness identifiers must match the independent values recorded below. Never infer a pass, combine evidence produced by different harness revisions, or remove an unperformed gate.
 
 ## Run identity
 
@@ -13,7 +13,9 @@ Copy this template to `pi3bplus-<UTC-date>-<candidate-short-SHA>/result.md` only
 | Release version | NOT RECORDED |
 | Debian package version | NOT RECORDED |
 | Candidate commit SHA | NOT RECORDED |
+| Candidate short SHA in run directory | NOT RECORDED |
 | Acceptance-harness commit SHA | NOT RECORDED |
+| Harness short SHA in run directory | NOT RECORDED |
 | CI workflow URL | NOT RECORDED |
 | CI run ID / attempt | NOT RECORDED |
 | CI artifact name | NOT RECORDED |
@@ -120,6 +122,24 @@ These do not replace the release gates.
 | Startup/readiness | NOT RECORDED | NOT RUN | — |
 | Snapshot p95 | NOT RECORDED | NOT RUN | — |
 | Soak RSS change | NOT RECORDED | NOT RUN | — |
+
+## CPU methodology evidence
+
+Record `BLOCKED` when the independent workload or environment is invalid. Record `FAIL` only when valid independent references expose a product threshold miss.
+
+| Observation | Recorded value | Raw evidence |
+|---|---:|---|
+| Idle aggregate reference | NOT RECORDED | — |
+| Idle slice range / maximum deviation | NOT RECORDED | — |
+| Half-capacity aggregate reference | NOT RECORDED | — |
+| Half-capacity slice range / maximum deviation | NOT RECORDED | — |
+| Idle + half comparison count | NOT RECORDED | — |
+| Median absolute difference | NOT RECORDED | — |
+| Nearest-rank p95 absolute difference | NOT RECORDED | — |
+| Full-load aggregate reference | NOT RECORDED | — |
+| Full-load reference minimum | NOT RECORDED | — |
+| Full-load service minimum | NOT RECORDED | — |
+| Measurement classification | NOT RUN | — |
 
 ## Lifecycle fixture
 

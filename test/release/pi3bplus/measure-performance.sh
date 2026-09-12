@@ -227,26 +227,83 @@ latency_mode() {
 }
 
 read_cpu_counters() {
-    awk '/^cpu / {idle=$5+$6; total=0; for (i=2;i<=9;i++) total+=$i; print total-idle, total; exit}' /proc/stat
+    awk '/^cpu / {for (i=2;i<=9;i++) printf "%s%s", $i, (i==9 ? ORS : OFS); exit}' /proc/stat
 }
 
-cpu_pair() {
+cpu_cleanup() {
+    if [ "${stress_pid:-}" ]; then
+        kill "$stress_pid" 2>/dev/null || true
+        wait "$stress_pid" 2>/dev/null || true
+        stress_pid=
+    fi
+    rm -f "${cpu_response:-}"
+}
+
+cpu_measurement_invalid() {
+    reason=$1
+    if [ "${cpu_dir:-}" ] && [ -d "$cpu_dir" ] && [ ! -e "$cpu_dir/cpu-summary.txt" ]; then
+        printf 'classification=BLOCKED\nreason=%s\n' "$reason" >"$cpu_dir/cpu-summary.txt"
+    fi
+    echo "joy-pi-health: CPU measurement invalid: $reason; Class C CPU gate is BLOCKED" >&2
+    exit 2
+}
+
+cpu_sample() {
     phase=$1
     index=$2
     url=$3
     output=$4
+    mono_before=$(awk '{print $1}' /proc/uptime)
     set -- $(read_cpu_counters)
-    busy_before=$1
-    total_before=$2
-    sleep 1
+    user_before=$1
+    nice_before=$2
+    system_before=$3
+    idle_before=$4
+    iowait_before=$5
+    irq_before=$6
+    softirq_before=$7
+    steal_before=$8
+    sleep_to_one_second "$(awk -v seconds="$mono_before" 'BEGIN {printf "%.0f", seconds * 1000000000}')"
+    mono_after=$(awk '{print $1}' /proc/uptime)
     set -- $(read_cpu_counters)
-    busy_after=$1
-    total_after=$2
-    reference=$(awk -v b1="$busy_before" -v b2="$busy_after" -v t1="$total_before" -v t2="$total_after" \
-        'BEGIN {busy=b2-b1; total=t2-t1; if (busy<0 || total<=0 || busy>total) exit 1; printf "%.6f", 100*busy/total}')
-    service_value=$(curl --silent --show-error --fail --max-time 1 "$url" | jq -er '.cpu.utilization_percent | numbers')
-    difference=$(awk -v reference="$reference" -v service="$service_value" 'BEGIN {d=reference-service; if (d<0) d=-d; printf "%.6f", d}')
-    printf '%s\t%s\t%s\t%s\t%s\n' "$phase" "$index" "$reference" "$service_value" "$difference" >>"$output"
+    user_delta=$(($1 - user_before))
+    nice_delta=$(($2 - nice_before))
+    system_delta=$(($3 - system_before))
+    idle_delta=$(($4 - idle_before))
+    iowait_delta=$(($5 - iowait_before))
+    irq_delta=$(($6 - irq_before))
+    softirq_delta=$(($7 - softirq_before))
+    steal_delta=$(($8 - steal_before))
+    busy_delta=$((user_delta + nice_delta + system_delta + irq_delta + softirq_delta))
+    total_delta=$((busy_delta + idle_delta + iowait_delta + steal_delta))
+    if [ "$user_delta" -lt 0 ] || [ "$nice_delta" -lt 0 ] || [ "$system_delta" -lt 0 ] || \
+        [ "$idle_delta" -lt 0 ] || [ "$iowait_delta" -lt 0 ] || [ "$irq_delta" -lt 0 ] || \
+        [ "$softirq_delta" -lt 0 ] || [ "$steal_delta" -lt 0 ]; then
+        busy_delta=-1
+    fi
+    interval=$(awk -v start="$mono_before" -v stop="$mono_after" 'BEGIN {printf "%.6f", stop-start}')
+    reference=$(awk -v busy="$busy_delta" -v total="$total_delta" 'BEGIN {if (busy<0 || total<=0 || busy>total) exit 1; printf "%.6f", 100*busy/total}') || reference=invalid
+    curl --silent --show-error --fail --max-time 1 --output "$cpu_response" "$url" || cpu_measurement_invalid "snapshot request failed"
+    service_fields=$(jq -er '[.cpu.utilization_percent, .observed_at] | @tsv' "$cpu_response") || cpu_measurement_invalid "snapshot CPU value or timestamp is unavailable"
+    set -- $service_fields
+    [ "$#" -eq 2 ] || cpu_measurement_invalid "snapshot CPU value or timestamp is malformed"
+    service_value=$1
+    snapshot_timestamp=$2
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$phase" "$index" "$mono_before" "$mono_after" "$interval" "$busy_delta" "$total_delta" "$reference" "$service_value" "$snapshot_timestamp" >>"$output"
+}
+
+cpu_start_workload() {
+    workers=$1
+    log=$2
+    stress-ng --cpu "$workers" --cpu-load 100 --cpu-method loop >"$log" 2>&1 &
+    stress_pid=$!
+}
+
+cpu_stop_workload() {
+    kill "$stress_pid" 2>/dev/null || true
+    wait "$stress_pid" 2>/dev/null || true
+    stress_pid=
 }
 
 cpu_mode() {
@@ -256,47 +313,78 @@ cpu_mode() {
     approval=
     if [ "$#" -eq 2 ]; then approval=$2; else url=$2; approval=$3; fi
     [ "$approval" = --allow-load ] || { echo "joy-pi-health: CPU workload requires explicit --allow-load" >&2; exit 2; }
-    for command_name in awk curl jq nproc sleep sort stress-ng; do require_command "$command_name"; done
-    output="$evidence_dir/raw/cpu-comparisons.tsv"
-    printf 'phase\tsample\treference_percent\tservice_percent\tabsolute_difference\n' >"$output"
+    cpu_dir="$evidence_dir/raw/cpu"
+    mkdir "$cpu_dir" 2>/dev/null || {
+        echo "joy-pi-health: refusing to overwrite existing CPU evidence directory: $cpu_dir" >&2
+        exit 1
+    }
+    for command_name in awk curl jq nproc sleep stress-ng systemctl uname; do
+        command -v "$command_name" >/dev/null 2>&1 || cpu_measurement_invalid "required command is missing: $command_name"
+    done
+    processor_count=$(nproc)
+    [ "$processor_count" -eq 4 ] || {
+        cpu_measurement_invalid "exactly four logical CPUs must be online; found $processor_count"
+    }
+    [ "$(systemctl is-active "$service")" = active ] || cpu_measurement_invalid "service is not active"
+    pid=$(main_pid)
+    cpu_response=$(mktemp)
+    stress_pid=
+    trap 'cpu_cleanup' EXIT
+    trap 'cpu_cleanup; exit 130' HUP INT TERM
+    curl --silent --show-error --fail --max-time 1 --output "$cpu_response" "$url" || cpu_measurement_invalid "initial snapshot request failed"
+    jq -e '.cpu.logical_cpu_count == 4 and (.cpu.utilization_percent | numbers)' "$cpu_response" >/dev/null || \
+        cpu_measurement_invalid "service CPU utilization is unavailable or logical CPU count is not four"
+
+    output="$cpu_dir/cpu-samples.tsv"
+    printf 'phase\tsample\tmonotonic_start_seconds\tmonotonic_end_seconds\tinterval_seconds\tbusy_delta\ttotal_delta\tslice_reference_percent\tservice_percent\tsnapshot_timestamp\n' >"$output"
+    {
+        echo "kernel=$(uname -a)"
+        echo "online_cpus=$(cat /sys/devices/system/cpu/online)"
+        echo "logical_cpus=$processor_count"
+        echo "stress_ng_version=$(stress-ng --version 2>&1 | head -n 1)"
+        echo "service_pid=$pid"
+        echo "ambient_load=$(cat /proc/loadavg)"
+        echo "half_workload=stress-ng --cpu 2 --cpu-load 100 --cpu-method loop"
+        echo "full_workload=stress-ng --cpu 4 --cpu-load 100 --cpu-method loop"
+    } >"$cpu_dir/cpu-environment.txt"
+
+    echo "settling idle plateau for 5 seconds" >&2
+    sleep 5
     index=1
-    while [ "$index" -le 10 ]; do cpu_pair idle "$index" "$url" "$output"; index=$((index + 1)); done
+    while [ "$index" -le 10 ]; do cpu_sample idle "$index" "$url" "$output"; index=$((index + 1)); done
 
-    stress-ng --cpu "$(nproc)" --cpu-load 50 --timeout 30s >"$evidence_dir/raw/stress-mixed.log" 2>&1 &
-    stress_pid=$!
-    trap 'kill "$stress_pid" 2>/dev/null || true; wait "$stress_pid" 2>/dev/null || true' EXIT HUP INT TERM
-    sleep 2
+    cpu_start_workload 2 "$cpu_dir/stress-half.log"
+    sleep 3
     index=1
-    while [ "$index" -le 10 ]; do cpu_pair mixed "$index" "$url" "$output"; index=$((index + 1)); done
-    wait "$stress_pid"
-    trap - EXIT HUP INT TERM
+    while [ "$index" -le 10 ]; do cpu_sample half "$index" "$url" "$output"; index=$((index + 1)); done
+    cpu_stop_workload
 
-    median_difference=$(median "$output" 5)
-    p95_difference=$(nearest_rank "$output" 5 0.95)
-    assert_at_most "$median_difference" 5 "median CPU absolute difference"
-    assert_at_most "$p95_difference" 10 "CPU p95 absolute difference"
-
-    busy_output="$evidence_dir/raw/cpu-all-core.tsv"
-    printf 'sample\tservice_percent\n' >"$busy_output"
-    stress-ng --cpu "$(nproc)" --cpu-load 100 --timeout 15s >"$evidence_dir/raw/stress-all-core.log" 2>&1 &
-    stress_pid=$!
-    trap 'kill "$stress_pid" 2>/dev/null || true; wait "$stress_pid" 2>/dev/null || true' EXIT HUP INT TERM
-    sleep 2
+    cpu_start_workload 4 "$cpu_dir/stress-full.log"
+    sleep 3
     index=1
     while [ "$index" -le 5 ]; do
-        sleep 1
-        value=$(curl --silent --show-error --fail --max-time 1 "$url" | jq -er '.cpu.utilization_percent | numbers')
-        printf '%s\t%s\n' "$index" "$value" >>"$busy_output"
-        awk -v value="$value" 'BEGIN {exit !(value >= 90)}' || {
-            echo "joy-pi-health: sustained all-core utilization is below 90%: $value" >&2
-            exit 1
-        }
+        cpu_sample full "$index" "$url" "$output"
         index=$((index + 1))
     done
-    wait "$stress_pid"
+    cpu_stop_workload
+
+    evaluator=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/cpu-evaluate.awk
+    set +e
+    awk -v comparisons="$cpu_dir/cpu-comparisons.tsv" \
+        -v plateaus="$cpu_dir/cpu-plateaus.tsv" \
+        -v all_core="$cpu_dir/cpu-all-core.tsv" \
+        -v summary="$cpu_dir/cpu-summary.txt" \
+        -f "$evaluator" "$output"
+    evaluation_status=$?
+    set -e
+    case "$evaluation_status" in
+        0) ;;
+        1) echo "joy-pi-health: CPU product acceptance failed; see $cpu_dir/cpu-summary.txt" >&2; exit 1 ;;
+        2) cpu_measurement_invalid "evaluator rejected the workload or environment evidence" ;;
+        *) echo "joy-pi-health: CPU evaluator failed unexpectedly" >&2; exit 1 ;;
+    esac
     trap - EXIT HUP INT TERM
-    printf 'median_absolute_difference=%s\np95_absolute_difference=%s\nmedian_limit=5\np95_limit=10\nall_core_minimum=90\n' \
-        "$median_difference" "$p95_difference" >"$evidence_dir/raw/cpu-summary.txt"
+    cpu_cleanup
 }
 
 soak_mode() {

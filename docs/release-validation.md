@@ -4,6 +4,8 @@ This operational runbook defines Class C acceptance for Joy Pi Health v0.1. It d
 
 The acceptance harness is frozen and reviewed before a physical run. A run must not change the harness in response to observed results. If a harness defect affects a gate, mark that gate `BLOCKED`, preserve its output, correct the harness separately, and restart the affected procedure.
 
+> **Approved Class C CPU-methodology correction — 2026-09-12.** The original harness compared independently phased one-second CPU windows under a bursty nominal 50% workload. Physical Pi 3B+ execution demonstrated that this method cannot produce trustworthy pairwise error measurements. Results from that method remain `BLOCKED` and are not reinterpreted. CPU correctness is henceforth measured using stable idle, half-capacity, and full-capacity plateaus; service observations are compared with independently measured plateau aggregates. The existing 20-observation count, median ≤5 percentage-point threshold, p95 ≤10 percentage-point threshold, and ≥90% full-load threshold remain unchanged. Product CPU semantics and implementation are unchanged.
+
 ## Evidence classes
 
 - **Class A — developer:** deterministic unit, integration, contract, static-policy, native-build, and Linux/ARM64 compile-only checks.
@@ -14,7 +16,7 @@ All three classes are required. CI success cannot establish Pi 3B+ acceptance.
 
 The v0.1 reference-hardware erratum corrects a mistaken Raspberry Pi 3B designation. The sole Class C gate is now Raspberry Pi 3B+. The known reference board reports `Raspberry Pi 3 Model B Plus Rev 1.3` and revision `a020d3`; the canonical model name is `Raspberry Pi 3 Model B Plus`. The stopped 2026-09-10 attempt under the former baseline remains historically `BLOCKED` and is never reinterpreted as a pass.
 
-The requirements, architecture, and README are included in the release artifacts. Consequently, the pre-correction Class B bytes cannot be reused: after this correction is committed, Class A and Class B must run again and a new exact artifact bundle must begin the restarted Class C procedure. The release version and artifact format remain unchanged.
+The requirements, architecture, and README are included in the release artifacts. Consequently, pre-correction Class B bytes cannot be reused: after this correction is committed, Class A and Class B must run again and a new exact artifact bundle must begin the restarted Class C procedure. The stopped `0922f75` CPU-harness run remains separate historical `BLOCKED` evidence and is not included in the harness-correction change. Return the reference Pi to the documented fresh pre-install state and use fresh staging and evidence directories; do not merge earlier `PASS` results. The release version and artifact format remain unchanged.
 
 ## Fixed Class C inputs
 
@@ -171,9 +173,9 @@ If firmware acquisition fails, preserve the result and stop the run. Do not patc
 
 ## 7. Metric acceptance
 
-Bracket service requests closely with independent observations and retain every pair.
+Bracket service requests closely with independent observations and retain every pair, except for CPU utilization, whose asynchronous trailing windows are evaluated against stable plateau aggregates as specified below.
 
-- **CPU utilization:** 20 pairs, ten at normal idle and ten under steady 50% all-core load. Median absolute difference must be at most 5 percentage points and nearest-rank p95 at most 10. A separate sustained all-core workload must produce at least 90% in every retained steady-state sample.
+- **CPU utilization:** 20 comparisons, ten service observations on a normal-idle plateau and ten on a half-capacity plateau. Compare every service value with the independently measured aggregate for its plateau. Median absolute difference must be at most 5 percentage points and nearest-rank p95 at most 10. A separate sustained all-core plateau must produce at least 90% in every retained independent reference and service sample and in the aggregate reference.
 - **Logical CPUs:** exact agreement with online OS topology.
 - **Load:** each value must fall within the immediately bracketing `/proc/loadavg` values, allowing only the source's 0.01 display quantum.
 - **Memory:** bracket with `/proc/meminfo`; total/available semantics must agree and `used = total - available` exactly.
@@ -188,6 +190,19 @@ Run the fixed CPU procedure only after workload approval:
 ```text
 sh test/release/pi3bplus/measure-performance.sh cpu EVIDENCE_DIR http://127.0.0.1:8080/v1/snapshot --allow-load
 ```
+
+The CPU procedure requires an active service with available CPU utilization and exactly four logical CPUs online. It refuses to overwrite an existing `raw/cpu/` directory, records environment and workload identity, and completes in approximately one minute:
+
+1. Settle at idle for five seconds, then retain ten consecutive one-second `/proc/stat` slices and request one service snapshot at each slice boundary.
+2. Run `stress-ng --cpu 2 --cpu-load 100 --cpu-method loop`, warm for three seconds, and retain ten slices and snapshots while the workload remains active.
+3. Run `stress-ng --cpu 4 --cpu-load 100 --cpu-method loop`, warm for three seconds, and retain five slices and snapshots while the workload remains active.
+4. Terminate and join every harness-owned workload on completion, failure, or interruption.
+
+The evaluator uses the product's busy/total counter semantics and weighted counter deltas. Every interval must be 0.9–1.1 seconds, with non-decreasing and internally consistent counters. The idle aggregate must be at most 10%; the half-capacity aggregate must be 45–55%; and every idle and half-capacity slice must be within five percentage points of its aggregate. Every full-capacity slice and its aggregate must be at least 90%.
+
+Invalid timing, counters, sample counts, topology, service availability, or workload stability is a distinct measurement-invalid result: record the CPU gate as `BLOCKED`, not `FAIL`, and restart it with a fresh `raw/cpu/` directory. Once the independent evidence is valid, an accuracy-threshold miss or a full-load service value below 90% is a product `FAIL`. Do not tune thresholds or workloads using the stopped physical observations.
+
+Retain `raw/cpu/cpu-samples.tsv`, `cpu-comparisons.tsv`, `cpu-plateaus.tsv`, `cpu-all-core.tsv`, `cpu-summary.txt`, `cpu-environment.txt`, and the separate `stress-half.log` and `stress-full.log` files. The sample evidence includes phase, sample number, monotonic interval, busy and total deltas, slice reference, service value, and snapshot timestamp.
 
 Counter resets, reboots, topology mutation, malformed data, impossible values, and internal defects use same-commit deterministic Class A evidence. Do not alter the Pi to manufacture them.
 
@@ -280,7 +295,7 @@ Under the restored final unit, use successful service observations plus read-onl
 Copy the [evidence template](release-evidence/v0.1/pi3bplus-template.md) into:
 
 ```text
-docs/release-evidence/v0.1/pi3bplus-<UTC-date>-<candidate-short-SHA>/result.md
+docs/release-evidence/v0.1/pi3bplus-<UTC-date>-<candidate-short-SHA>-h<harness-short-SHA>/result.md
 ```
 
 Store reviewed text, JSON, and TSV evidence under its `raw/` directory. Do not commit candidate artifacts, unique serials, machine IDs, secrets, private keys, or unfiltered system logs. Produce `EVIDENCE_SHA256SUMS` after review.
@@ -407,10 +422,10 @@ The acceptance-created administrator drop-in must be a uniquely named file benea
 
 ## Commit boundaries
 
-The harness/runbook is reviewed and committed before physical testing, separately from evidence. A suitable harness commit is:
+The corrected harness/runbook is reviewed and committed before physical testing, separately from evidence. Record candidate and harness SHAs independently; the directory name must contain both short SHAs so evidence from different harnesses cannot be mixed. A suitable harness commit is:
 
 ```text
-test: add Raspberry Pi 3B+ release acceptance harness
+test: correct Pi 3B+ CPU acceptance methodology
 ```
 
 During physical measurement, do not commit. After the completed run, a separate evidence-only change may add genuine reviewed results. A suitable later commit is:
