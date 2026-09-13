@@ -8,6 +8,8 @@ The acceptance harness is frozen and reviewed before a physical run. A run must 
 
 > **Approved Class C fresh-install-equivalent baseline correction — 2026-09-13.** Class C may start from either the documented fresh Raspberry Pi OS image or a verified Joy Pi Health package-scoped reset on that same supported reference environment. The reset is accepted only when the complete pre-reset inventory and post-reset verification below prove that no package, dpkg, systemd, deb-systemd-helper, ACL, process, or listener state can alter first-install behavior. The intentionally retained service identity is valid only when it still matches policy. Journals, dpkg logs, and historical evidence remain untouched because they do not control package installation or service enablement. Any incomplete, ambiguous, or failed baseline verification is `BLOCKED`. This correction changes only the operational starting-state proof; package behavior and release thresholds are unchanged.
 
+> **Approved Class C restart-policy fixture correction — 2026-09-13.** The original exit-status fixture replaced `ExecStart` while inheriting the packaged `Type=notify`. A process that exits successfully before sending `READY=1` is classified by systemd as a protocol failure, so the `--help` case entered the unexpected-failure restart policy instead of measuring exit status. That observation remains `BLOCKED` and is not reinterpreted. Exit-status fixtures henceforth use acceptance-only `Type=exec` drop-ins so systemd classifies the executable's actual exit status; the final packaged unit remains `Type=notify`, and its readiness, unexpected-failure supervision, backoff, and shutdown behavior remain separately required. This correction changes no product, package, threshold, or frozen readiness semantics.
+
 ## Evidence classes
 
 - **Class A — developer:** deterministic unit, integration, contract, static-policy, native-build, and Linux/ARM64 compile-only checks.
@@ -272,11 +274,13 @@ Do not manufacture firmware busy/timeout, unsupported-platform, or internal-defe
 
 Use one acceptance-only runtime drop-in under `/run/systemd/system/joy-pi-health.service.d/`. Remove it and run `daemon-reload` after every case. Never edit the packaged unit.
 
-Test these `ExecStart` substitutions independently:
+Test these exit-status substitutions independently. Set `Type=exec` in each acceptance-only drop-in so the fixture measures the executable's exit status rather than `Type=notify` readiness protocol. This does not change or relax the packaged unit; verify that it returns to `Type=notify` after every case.
 
 - `/usr/bin/joy-pi-health --help`: clean exit 0, no restart.
 - `/usr/bin/joy-pi-health --listen-port=0`: configuration exit 2, no readiness and no restart.
 - `/usr/bin/joy-pi-health --listen-address=192.0.2.1 --allow-non-loopback=true`: valid configuration followed by operational bind failure, exit 1 and restart.
+
+Before each start, record the effective `Type` and baseline `NRestarts`. Record UTC and monotonic timestamps, wait at least two seconds after the process exits, and then retain `Type`, `ActiveState`, `SubState`, `ExecMainCode`, `ExecMainStatus`, `Result`, and final `NRestarts`. Exit 0 must be inactive with a successful result and no restart-count increase. Exit 2 must report status 2 and no restart-count increase because `RestartPreventExitStatus=2` applies. Exit 1 must report status 1 and increase the restart count. A fixture that is not effectively `Type=exec`, or a case whose evidence cannot distinguish its baseline and final restart counts, is `BLOCKED`.
 
 For unexpected failure, restore the packaged unit, send SIGABRT to the main process, and verify restart. Record this as unexpected-failure supervision evidence, not as an induced internal collector defect. SIGTERM/operator stop must remain graceful and stopped.
 
@@ -370,6 +374,8 @@ If a harness defect is found:
 5. rerun applicable repository and shell checks;
 6. restart every affected measurement whose comparability is no longer guaranteed.
 
+When a reviewed harness-only correction does not change candidate bytes, permission profile, platform prerequisites, or an unaffected procedure, record the rerun as a corrective evidence supplement instead of copying raw evidence into a new full-run directory. The supplement directory name contains the unchanged candidate short SHA and corrected harness short SHA. It records the base run path and harness SHA, verifies the original artifact hashes and installed executable again, and contains fresh evidence for every affected measurement. The base run retains its historical status and files. The final release decision may cite the immutable base run together with its supplement only when the correction explicitly identifies the affected measurements and all identity checks match; otherwise the combined baseline is `BLOCKED` and the complete procedure must restart.
+
 ## 15. Cleanup
 
 After success, remove temporary fixtures and acceptance-created drop-ins, restore the exact `0.1.0-1` package and packaged unit, reload systemd, and leave the service enabled, active, unprivileged, and loopback-only.
@@ -399,15 +405,20 @@ sudo apt install ./joy-pi-health_0.1.0-1_arm64.deb
 
 Do not manually enable or start the service while classifying fresh installation. If a later test deliberately leaves the service stopped, an operator start used solely to prepare a subsequent managed test must be recorded after the fresh-install result and must not be cited as installation evidence.
 
-For each exit-status case, create only this runtime drop-in and replace the final `ExecStart` line with the case under test:
+For each exit-status case, create only this runtime drop-in and replace the final `ExecStart` line with the case under test. Record the effective fixture type and restart-count baseline before starting it:
 
 ```sh
 sudo install -d -m 0755 /run/systemd/system/joy-pi-health.service.d
-printf '%s\n' '[Service]' 'ExecStart=' 'ExecStart=/usr/bin/joy-pi-health --help' | sudo tee /run/systemd/system/joy-pi-health.service.d/acceptance.conf >/dev/null
+printf '%s\n' '[Service]' 'Type=exec' 'ExecStart=' 'ExecStart=/usr/bin/joy-pi-health --help' | sudo tee /run/systemd/system/joy-pi-health.service.d/acceptance.conf >/dev/null
 sudo systemctl daemon-reload
 sudo systemctl reset-failed joy-pi-health.service
-sudo systemctl start joy-pi-health.service
-systemctl show joy-pi-health.service -p ExecMainCode -p ExecMainStatus -p Result -p NRestarts
+systemctl show joy-pi-health.service -p Type -p NRestarts
+date -u +%Y-%m-%dT%H:%M:%S.%NZ
+cut -d ' ' -f 1 /proc/uptime
+sudo systemctl start joy-pi-health.service || true
+sleep 2
+cut -d ' ' -f 1 /proc/uptime
+systemctl show joy-pi-health.service -p Type -p ActiveState -p SubState -p ExecMainCode -p ExecMainStatus -p Result -p NRestarts
 ```
 
 The other exact `ExecStart` values are:
@@ -423,6 +434,7 @@ Remove the runtime override after every case:
 sudo rm -f /run/systemd/system/joy-pi-health.service.d/acceptance.conf
 sudo systemctl daemon-reload
 sudo systemctl reset-failed joy-pi-health.service
+systemctl show joy-pi-health.service -p Type -p FragmentPath
 ```
 
 Exercise controlled signal behavior only after recording the main PID:

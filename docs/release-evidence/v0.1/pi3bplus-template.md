@@ -4,7 +4,7 @@
 **Normative gates:** [v0.1 requirements](../../requirements-v0.1.md)
 **Procedure:** [release-validation runbook](../../release-validation.md)
 
-Copy this template to `pi3bplus-<UTC-date>-<candidate-short-SHA>-h<harness-short-SHA>/result.md` only for a real completed or stopped Class C run. The candidate and harness identifiers must match the independent values recorded below. Never infer a pass, combine evidence produced by different harness revisions, or remove an unperformed gate.
+Copy this template to `pi3bplus-<UTC-date>-<candidate-short-SHA>-h<harness-short-SHA>/result.md` only for a real completed or stopped Class C run. The candidate and harness identifiers must match the independent values recorded below. Never infer a pass, copy evidence produced by a different harness revision into this directory, or remove an unperformed gate. A corrective supplement is permitted only under the runbook's harness-defect rule and must reference its immutable base run explicitly.
 
 ## Run identity
 
@@ -16,6 +16,10 @@ Copy this template to `pi3bplus-<UTC-date>-<candidate-short-SHA>-h<harness-short
 | Candidate short SHA in run directory | NOT RECORDED |
 | Acceptance-harness commit SHA | NOT RECORDED |
 | Harness short SHA in run directory | NOT RECORDED |
+| Evidence record type (`full run` or `corrective supplement`) | NOT RECORDED |
+| Base Class C run path (`NOT APPLICABLE` for full run) | NOT RECORDED |
+| Base acceptance-harness commit SHA (`NOT APPLICABLE` for full run) | NOT RECORDED |
+| Corrected affected measurements (`NOT APPLICABLE` for full run) | NOT RECORDED |
 | CI workflow URL | NOT RECORDED |
 | CI run ID / attempt | NOT RECORDED |
 | CI artifact name | NOT RECORDED |

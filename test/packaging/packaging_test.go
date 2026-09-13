@@ -58,6 +58,25 @@ func TestSystemdContract(t *testing.T) {
 	}
 }
 
+func TestRestartPolicyAcceptanceFixture(t *testing.T) {
+	unit := read(t, "debian", "joy-pi-health.service.in")
+	if !strings.Contains(unit, "Type=notify") {
+		t.Fatal("packaged service no longer uses Type=notify")
+	}
+
+	runbook := read(t, "docs", "release-validation.md")
+	for _, required := range []string{
+		"Approved Class C restart-policy fixture correction",
+		"'Type=exec' 'ExecStart=' 'ExecStart=/usr/bin/joy-pi-health --help'",
+		"systemctl show joy-pi-health.service -p Type -p ActiveState -p SubState -p ExecMainCode -p ExecMainStatus -p Result -p NRestarts",
+		"verify that it returns to `Type=notify` after every case",
+	} {
+		if !strings.Contains(runbook, required) {
+			t.Errorf("release runbook is missing restart-policy fixture requirement %q", required)
+		}
+	}
+}
+
 func TestServiceIdentity(t *testing.T) {
 	sysusers := strings.TrimSpace(read(t, "debian", "joy-pi-health.sysusers"))
 	if sysusers != `u _joy-pi-health - "Joy Pi Health service" /nonexistent /usr/sbin/nologin` {
