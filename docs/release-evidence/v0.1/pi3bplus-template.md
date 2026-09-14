@@ -122,6 +122,23 @@ Use only `PASS`, `FAIL`, `NOT RUN`, or `BLOCKED`. Add the exact raw-evidence pat
 | Final proc/sysfs/statfs/rtnetlink access | NOT RUN | — | |
 | Final journal-only logging/no state | NOT RUN | — | |
 
+## Unexpected-failure supervision evidence
+
+| Observation | Recorded value | Raw evidence |
+|---|---|---|
+| Effective service type | NOT RECORDED | — |
+| Effective `GOTRACEBACK` setting | NOT RECORDED | — |
+| Effective core limit | NOT RECORDED | — |
+| Effective restart / prevent policy | NOT RECORDED | — |
+| Main PID before `SIGABRT` | NOT RECORDED | — |
+| Baseline `NRestarts` | NOT RECORDED | — |
+| Termination `ExecMainCode` / `ExecMainStatus` / `Result` | NOT RECORDED | — |
+| Main PID after restart | NOT RECORDED | — |
+| Final `NRestarts` | NOT RECORDED | — |
+| Active/readiness recovery | NOT RUN | — |
+| Stored core payload absent | NOT RUN | — |
+| Unexpected-failure classification | NOT RUN | — |
+
 ## Engineering targets and diagnostics
 
 These do not replace the release gates.

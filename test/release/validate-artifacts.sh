@@ -94,13 +94,23 @@ for setting in \
     Type=notify NotifyAccess=main ExecStart=/usr/bin/joy-pi-health \
     User=_joy-pi-health Group=_joy-pi-health SupplementaryGroups=video \
     Restart=on-failure RestartPreventExitStatus=2 RestartSec=1s RestartSteps=5 \
-    RestartMaxDelaySec=30s TimeoutStopSec=2s NoNewPrivileges=yes \
+    RestartMaxDelaySec=30s Environment=GOTRACEBACK=crash LimitCORE=0 \
+    TimeoutStopSec=2s NoNewPrivileges=yes \
     ProtectSystem=strict ProtectHome=yes MemoryDenyWriteExecute=yes \
     CapabilityBoundingSet= AmbientCapabilities= DevicePolicy=closed \
     'DeviceAllow=/dev/vcio r' 'DeviceAllow=/dev/vcio_gencmd r' UMask=0077; do
     grep -Fx "$setting" "$unit" >/dev/null
 done
 test "$(grep -c '^DeviceAllow=' "$unit")" = 2
+test "$(grep -c '^Environment=' "$unit")" = 1
+if grep -E '^Environment(File)?=.*JOY_PI_HEALTH_' "$unit" >/dev/null; then
+    echo "joy-pi-health: packaged unit sets application configuration environment" >&2
+    exit 1
+fi
+if grep -E '^EnvironmentFile=' "$unit" >/dev/null; then
+    echo "joy-pi-health: packaged unit uses an environment file" >&2
+    exit 1
+fi
 test ! -e "$package_root/usr/lib/udev/rules.d/70-joy-pi-health-vcio-acl.rules"
 
 grep -F 'deb-systemd-helper enable' "$control_root/postinst" >/dev/null

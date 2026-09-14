@@ -10,6 +10,8 @@ The acceptance harness is frozen and reviewed before a physical run. A run must 
 
 > **Approved Class C restart-policy fixture correction — 2026-09-13.** The original exit-status fixture replaced `ExecStart` while inheriting the packaged `Type=notify`. A process that exits successfully before sending `READY=1` is classified by systemd as a protocol failure, so the `--help` case entered the unexpected-failure restart policy instead of measuring exit status. That observation remains `BLOCKED` and is not reinterpreted. Exit-status fixtures henceforth use acceptance-only `Type=exec` drop-ins so systemd classifies the executable's actual exit status; the final packaged unit remains `Type=notify`, and its readiness, unexpected-failure supervision, backoff, and shutdown behavior remain separately required. This correction changes no product, package, threshold, or frozen readiness semantics.
 
+> **Class C unexpected-failure supervision remediation — 2026-09-14.** The `1d91952` Class C run validly demonstrated that the Go runtime's default fatal path translated an externally delivered `SIGABRT` into numeric exit status 2. systemd could not distinguish that result from the frozen configuration-error exit status, so `RestartPreventExitStatus=2` correctly suppressed restart. That run remains `FAIL` and is not reinterpreted or supplemented. Managed execution henceforth sets `GOTRACEBACK=crash`, causing unrecovered Go panics, fatal runtime conditions, and fatal signals to terminate by `SIGABRT` on Linux while intentional configuration failures remain numeric exit 2. `LimitCORE=0` prevents the service from retaining a core image. The ABRT acceptance stimulus, `Type=notify`, exit statuses, restart policy, backoff, shutdown behavior, and all frozen thresholds remain unchanged. Because the packaged unit changes, Class A and Class B must run again and Class C must restart completely with new exact release bytes.
+
 ## Evidence classes
 
 - **Class A — developer:** deterministic unit, integration, contract, static-policy, native-build, and Linux/ARM64 compile-only checks.
@@ -282,7 +284,7 @@ Test these exit-status substitutions independently. Set `Type=exec` in each acce
 
 Before each start, record the effective `Type` and baseline `NRestarts`. Record UTC and monotonic timestamps, wait at least two seconds after the process exits, and then retain `Type`, `ActiveState`, `SubState`, `ExecMainCode`, `ExecMainStatus`, `Result`, and final `NRestarts`. Exit 0 must be inactive with a successful result and no restart-count increase. Exit 2 must report status 2 and no restart-count increase because `RestartPreventExitStatus=2` applies. Exit 1 must report status 1 and increase the restart count. A fixture that is not effectively `Type=exec`, or a case whose evidence cannot distinguish its baseline and final restart counts, is `BLOCKED`.
 
-For unexpected failure, restore the packaged unit, send SIGABRT to the main process, and verify restart. Record this as unexpected-failure supervision evidence, not as an induced internal collector defect. SIGTERM/operator stop must remain graceful and stopped.
+For unexpected failure, restore the packaged unit and verify that its effective properties include `Type=notify`, `Environment=GOTRACEBACK=crash`, `LimitCORE=0`, `Restart=on-failure`, and `RestartPreventExitStatus=2`. Record the main PID and baseline `NRestarts`, send SIGABRT to that main process, and verify that systemd observes signal 6 (`SIGABRT`) rather than numeric exit status 2. Retain the journal termination and restart entries, the prior and replacement PIDs, the final `NRestarts`, and the effective core limit. Require an increased restart count, a different nonzero main PID, and restored active/ready service state. Verify that no stored core payload was retained for the tested process; missing or ambiguous evidence is `BLOCKED`, while a valid signal termination without restart is `FAIL`. Record this as unexpected-failure supervision evidence, not as an induced internal collector defect. SIGTERM/operator stop must remain graceful and stopped.
 
 Use `NRestarts` and monotonic journal timestamps to record the initial one-second retry, five increasing configured steps, approximately 30-second maximum, and continued attempts at the maximum. A permanent `start-limit-hit` contradicts continued bounded restart and is a release-blocking failure.
 
@@ -441,9 +443,10 @@ Exercise controlled signal behavior only after recording the main PID:
 
 ```sh
 systemctl show joy-pi-health.service -p MainPID -p NRestarts
+systemctl show joy-pi-health.service -p Type -p Environment -p LimitCORE -p Restart -p RestartPreventExitStatus
 sudo systemctl kill --kill-whom=main --signal=ABRT joy-pi-health.service
 sleep 2
-systemctl show joy-pi-health.service -p MainPID -p NRestarts -p Result
+systemctl show joy-pi-health.service -p MainPID -p NRestarts -p Result -p ExecMainCode -p ExecMainStatus
 sudo systemctl stop joy-pi-health.service
 ```
 

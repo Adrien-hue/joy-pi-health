@@ -41,7 +41,8 @@ func TestSystemdContract(t *testing.T) {
 		"Type=notify", "NotifyAccess=main", "ExecStart=/usr/bin/joy-pi-health",
 		"User=_joy-pi-health", "Group=_joy-pi-health", "Restart=on-failure",
 		"RestartPreventExitStatus=2", "RestartSec=1s", "RestartSteps=5",
-		"RestartMaxDelaySec=30s", "TimeoutStopSec=2s", "NoNewPrivileges=yes",
+		"RestartMaxDelaySec=30s", "Environment=GOTRACEBACK=crash", "LimitCORE=0",
+		"TimeoutStopSec=2s", "NoNewPrivileges=yes",
 		"ProtectSystem=strict", "ProtectHome=yes", "MemoryDenyWriteExecute=yes",
 		"CapabilityBoundingSet=", "AmbientCapabilities=", "DevicePolicy=closed",
 		"DeviceAllow=/dev/vcio r", "DeviceAllow=/dev/vcio_gencmd r", "UMask=0077",
@@ -51,10 +52,13 @@ func TestSystemdContract(t *testing.T) {
 			t.Errorf("service unit is missing %q", value)
 		}
 	}
-	for _, forbidden := range []string{"User=root", "PrivateDevices=yes", "ReadWritePaths=", "Environment=", "EnvironmentFile="} {
+	for _, forbidden := range []string{"User=root", "PrivateDevices=yes", "ReadWritePaths=", "EnvironmentFile=", "Environment=JOY_PI_HEALTH_"} {
 		if strings.Contains(unit, forbidden) {
 			t.Errorf("service unit contains forbidden directive %q", forbidden)
 		}
+	}
+	if strings.Count(unit, "Environment=") != 1 {
+		t.Error("service unit must contain only the managed Go crash-mode environment setting")
 	}
 }
 
@@ -67,7 +71,10 @@ func TestRestartPolicyAcceptanceFixture(t *testing.T) {
 	runbook := read(t, "docs", "release-validation.md")
 	for _, required := range []string{
 		"Approved Class C restart-policy fixture correction",
+		"Class C unexpected-failure supervision remediation",
 		"'Type=exec' 'ExecStart=' 'ExecStart=/usr/bin/joy-pi-health --help'",
+		"GOTRACEBACK=crash",
+		"LimitCORE=0",
 		"systemctl show joy-pi-health.service -p Type -p ActiveState -p SubState -p ExecMainCode -p ExecMainStatus -p Result -p NRestarts",
 		"verify that it returns to `Type=notify` after every case",
 	} {
