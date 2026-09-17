@@ -21,8 +21,11 @@ Copy this template to `pi3bplus-<UTC-date>-<candidate-short-SHA>-h<harness-short
 | Base acceptance-harness commit SHA (`NOT APPLICABLE` for full run) | NOT RECORDED |
 | Corrected affected measurements (`NOT APPLICABLE` for full run) | NOT RECORDED |
 | CI workflow URL | NOT RECORDED |
+| Class A quality workflow URL / run ID | NOT RECORDED |
 | CI run ID / attempt | NOT RECORDED |
 | CI artifact name | NOT RECORDED |
+| Sign-off clarification / approved deviation references | NOT RECORDED |
+| `commands.log` retention status | NOT RECORDED |
 | Firmware permission profile | NOT RECORDED |
 | Starting baseline type (`fresh OS image` or `verified package reset`) | NOT RECORDED |
 | Package baseline classification | NOT RUN |
@@ -81,6 +84,7 @@ Use only `PASS`, `FAIL`, `NOT RUN`, or `BLOCKED`. Add the exact raw-evidence pat
 | Pi 3B+ / Trixie reference platform | NOT RUN | — | |
 | Rootless tar execution | NOT RUN | — | |
 | Fresh or verified fresh-install-equivalent Debian installation | NOT RUN | — | |
+| Automatic startup after reboot | NOT RUN | — | |
 | Package baseline state | NOT RUN | — | |
 | Managed identity and file ownership | NOT RUN | — | |
 | systemd readiness semantics | NOT RUN | — | |
@@ -183,6 +187,22 @@ Record `BLOCKED` when the independent workload or environment is invalid. Record
 ## Commands executed
 
 Reference `commands.log` and record any manual command not captured by a harness. Do not record secrets.
+
+If a transcript was not retained, state `commands.log: NOT RETAINED`; never reconstruct or fabricate one. An approved run-specific deviation and independently sufficient per-gate evidence are required before acceptance. The ad6a4b4 deviation does not authorize transcript omission in another run.
+
+## Logging evidence allocation
+
+| Evidence component | Status | Evidence |
+|---|---|---|
+| Physical initial warning, repeated-request suppression, recovery, and quiet healthy/4xx requests | NOT RUN | — |
+| Same-commit controlled-clock five-minute reminder and prompt recurrence after recovery | NOT RUN | — |
+| Production reminder interval remains five minutes | NOT RUN | — |
+
+Apply the labelled 2026-09-17 runbook clarification. Cite `TestDegradationReporterSuppressesRemindsAndRecovers`, its candidate commit, the successful Class A execution, and physical evidence independently. Never describe deterministic timing as a physical Pi observation.
+
+## Final filesystem evidence
+
+Reference the non-overwriting capture of `dpkg-query -L`, symbolic/numeric modes, owner/group, `dpkg --verify` output and exact status, and explicit presence/absence of `/var/lib/joy-pi-health`, `/var/log/joy-pi-health`, `/var/cache/joy-pi-health`, and `/run/joy-pi-health`. Record verification of the capture's `SHA256SUMS`; checksum success alone does not establish package acceptance.
 
 ## Known observations and deviations
 

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "candidate_sha": "ad6a4b4e2eb307502c822529863532f2947914d3",
+  "executed_harness_sha": "ad6a4b4e2eb307502c822529863532f2947914d3",
+  "archive_path_relative_to_repository": ".local/release-evidence/v0.1/pi3bplus-2026-09-14-ad6a4b4-had6a4b4/",
+  "archive_manifest": {
+    "path": "ARCHIVE_SHA256SUMS",
+    "sha256": "dc1737f824b178cb5ad70f94576ddd49ff93f11aeb14e4adf62835c2dbfe6c54",
+    "entries": 929,
+    "payload_bytes": 847446,
+    "format": "SHA-256 lowercase hex, two spaces, archive-root-relative path; UTF-8 without BOM, LF",
+    "coverage": "Every file in finalized/ and original-capture/; excludes only ARCHIVE_SHA256SUMS itself"
+  },
+  "branches": [
+    {
+      "path": "finalized/",
+      "files": 475,
+      "bytes": 526327,
+      "source": "Previously uncommitted complete documentation evidence directory, moved byte-for-byte",
+      "original_seal": {
+        "path": "finalized/EVIDENCE_SHA256SUMS",
+        "sha256": "224eb0b53027366a1118979f7ad183efce910ceffff8137f8434f7336404c552",
+        "entries": 474,
+        "coverage": "Every finalized file except EVIDENCE_SHA256SUMS itself; paths relative to finalized/"
+      }
+    },
+    {
+      "path": "original-capture/",
+      "files": 454,
+      "bytes": 321119,
+      "source": "C:/src/joy-pi-health-classc/review-ad6a4b4/evidence",
+      "treatment": "Copied byte-for-byte, including original private identifiers; external source unchanged"
+    }
+  ],
+  "verification": "Counts, relative paths, byte sizes and SHA-256 of both branches matched pre-operation inventories; original finalized seal and all archive entries verified",
+  "retention_date_local": "2026-09-17",
+  "commands_log": "NOT RETAINED",
+  "security": "Ignored local archive; back up separately with restricted access. Not retrievable from Git alone."
+}

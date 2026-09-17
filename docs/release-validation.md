@@ -41,6 +41,8 @@ The operator also records the candidate commit, CI workflow URL, run ID, run att
 
 Before the first command, create `commands.log`. Record each command with a UTC timestamp and capture its stdout/stderr into the named raw-evidence file. Never place passwords, tokens, private keys, board serials, or machine IDs in the transcript.
 
+> **Approved evidence-retention deviation — ad6a4b4, 2026-09-17.** A dedicated `commands.log` was not retained for this run and shall not be reconstructed. Record `commands.log: NOT RETAINED`. Acceptance may rely on independently sufficient retained per-gate evidence establishing the relevant inputs, operations, and outcomes. Any gate that depends on an unrecorded fact remains `BLOCKED`. This deviation applies only to this run, does not waive any product test or threshold, and does not remove the transcript requirement for future runs.
+
 ## Harness commands
 
 The scripts require an explicit evidence directory and never report a release decision. They retain observations from which the operator assigns gate status.
@@ -258,9 +260,11 @@ Counter resets, reboots, topology mutation, malformed data, impossible values, a
 
 ## 8. Degradation logging
 
+> **Approved Class C logging-evidence clarification — 2026-09-17.** Degradation logging acceptance combines exact-candidate physical Pi 3B+ evidence with successful deterministic tests from the same candidate commit. Physical evidence must demonstrate initial degradation logging, suppression of repeated identical failures, recovery logging, and absence of routine successful-request or client-error logging. The fixed five-minute reminder boundary and prompt recurrence after recovery are verified using a controlled clock in `TestDegradationReporterSuppressesRemindsAndRecovers`, together with confirmation that the production reminder interval remains five minutes. The result record must identify both evidence sources and must not describe deterministic timing assertions as physical observations. Both evidence components are required; missing or failing evidence prevents `PASS`. This clarification changes no product behavior, interval, threshold, candidate bytes, or physical measurement. Historical results remain unchanged.
+
 After firmware permission acceptance, safely induce stale CPU publication by stopping the service process with SIGSTOP for longer than 1.25 seconds and then sending SIGCONT. Do not stop systemd itself.
 
-Verify:
+Verify using the physical/deterministic evidence allocation above:
 
 - the first resulting CPU issue logs promptly;
 - repeated identical snapshots are suppressed;
@@ -269,6 +273,8 @@ Verify:
 - recurrence after recovery logs promptly;
 - successful requests and client 4xx responses do not create degradation logs;
 - no complete snapshot payload is logged.
+
+The deterministic test is in `internal/observe/degradation_test.go`; the production interval is in `internal/observe/degradation.go`. Retain the exact candidate SHA, test identity, successful same-commit Class A job evidence, and the physical observation paths. This is an evidence-allocation clarification under architecture §13, not a production or measurement-harness change. Keep the executed harness SHA unchanged and record this later sign-off clarification separately; existing exact-candidate observations do not need to be rerun solely for this clarification.
 
 Do not manufacture firmware busy/timeout, unsupported-platform, or internal-defect paths on the device.
 
@@ -353,6 +359,8 @@ docs/release-evidence/v0.1/pi3bplus-<UTC-date>-<candidate-short-SHA>-h<harness-s
 ```
 
 Store reviewed text, JSON, and TSV evidence under its `raw/` directory. Do not commit candidate artifacts, unique serials, machine IDs, secrets, private keys, or unfiltered system logs. Produce `EVIDENCE_SHA256SUMS` after review.
+
+**Approved ad6a4b4 evidence-retention clarification — 2026-09-17.** For the currently uncommitted `pi3bplus-2026-09-14-ad6a4b4-had6a4b4` acceptance record only, Git retains the final 49-gate result, approvals, provenance, identity and measurement summaries, and checksum references instead of the complete raw evidence tree. Preserve the complete finalized reviewed tree, including its original `EVIDENCE_SHA256SUMS`, byte-for-byte under `.local/release-evidence/v0.1/pi3bplus-2026-09-14-ad6a4b4-had6a4b4/finalized/`; preserve the separate original capture under the sibling `original-capture/`. Verify source and archive file counts and hashes before replacing the untracked documentation tree with the curated record. `ARCHIVE_SHA256SUMS` seals both local branches; the tracked `archive-reference.json` records its digest and the original finalized seal digest. `RECORD_SHA256SUMS` separately seals the curated record. Each manifest excludes itself. Raw evidence remains required for detailed audit and must be backed up separately: a Git clone cannot restore the ignored local archive. Retain all blocked/skipped attempts and historical evidence unchanged. This storage-only clarification changes no gate, threshold, evidence classification, candidate bytes, or executed harness; the approved logging-timing allocation and `commands.log: NOT RETAINED` deviation remain explicit.
 
 Statuses mean:
 

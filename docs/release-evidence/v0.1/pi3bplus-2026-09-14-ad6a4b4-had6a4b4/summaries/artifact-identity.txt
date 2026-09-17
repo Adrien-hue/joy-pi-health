@@ -1,0 +1,28 @@
+candidate_sha=ad6a4b4e2eb307502c822529863532f2947914d3
+executed_harness_sha=ad6a4b4e2eb307502c822529863532f2947914d3
+package_version=0.1.0-1
+package_architecture=arm64
+toolchain=Go 1.27.1
+target=linux/arm64/v8.0
+build=pure-Go static executable; cgo disabled; no third-party dependencies
+artifact_id=10367678391
+artifact_zip_sha256=791c7092aca5384f276303b0f2b710df406b0fe089cc88bbc9fde5bcf6830d8d
+
+Bundle entries: independent CI archive, workstation and Pi identity checks agree.
+c0992377e669f30038f9b4b9359957a5a0b733c841abe63857ff58fe2068f972  joy-pi-health_0.1.0-1_arm64.deb
+508bd4749ded1f5626a45434ea53f150ee397ee1ac2734d8a1e741496668a2e5  joy-pi-health-v0.1.0-linux-arm64.tar.gz
+9d6b7459fa73b64a2e7fc3267b56e97e1124e3186077980f1ad53d1d5795b80c  joy-pi-health-v0.1.0-release.json
+eb60ce3e13be673a86ab3f385c2a09dd36288802b58987bb62fdb91a9b58bafe  SHA256SUMS
+
+portable_debian_installed_running_executable_sha256=a8fee16c0d65dd27f9030980aa69b0dca09ae5eb8d03c4118d7aef2f4c8907cd
+packaged_installed_unit_sha256=baabe2efa2421b9fc098cd4c9a3bf90f0a81c960b8df7fd40bc31a8650fae598
+final_dpkg_verify_exit_status=0
+final_dpkg_verify_stdout=empty
+final_dpkg_verify_stderr=empty
+
+Local archive locators (not Git paths):
+finalized/raw/ci/archive-verification.txt
+finalized/raw/workstation-artifact-hashes.txt
+finalized/raw/pi/raw/artifact-hashes.txt
+finalized/raw/pi-final-identity/
+finalized/raw/pi-final-filesystem-2026-09-17/

@@ -1,0 +1,16 @@
+{
+  "candidate_sha": "ad6a4b4e2eb307502c822529863532f2947914d3",
+  "quality_url": "https://github.com/Adrien-hue/joy-pi-health/actions/runs/34893626368",
+  "release_validation_url": "https://github.com/Adrien-hue/joy-pi-health/actions/runs/34893626428",
+  "release_validation_attempt": 1,
+  "artifact_name": "joy-pi-health-ci-validation-ad6a4b4e2eb307502c822529863532f2947914d3-34893626428-1",
+  "artifact_id": 10367678391,
+  "archive_sha256": "791c7092aca5384f276303b0f2b710df406b0fe089cc88bbc9fde5bcf6830d8d",
+  "verification": "Authenticated GitHub jobs and artifact metadata; exact checkout SHA in each job's logs; complete successful test steps; archive downloaded independently, archive digest and all four contained files compared with local candidate bundle and Pi artifact-hashes.txt.",
+  "verification_date_local": "2026-09-17",
+  "notes": [
+    "Commit-run-list connector is PR-only and returned no runs for the push; jobs fetched by supplied run IDs succeeded.",
+    "Only relevant CI log excerpts retained; no credentials or signed download URLs retained.",
+    "Archive and candidate artifacts are not part of this evidence set."
+  ]
+}
